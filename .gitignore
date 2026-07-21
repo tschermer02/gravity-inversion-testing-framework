@@ -36,7 +36,3 @@ Thumbs.db
 build/
 dist/
 
-# Generated experiment outputs
-results/
-figures/
-*.log
