@@ -1,0 +1,37 @@
+{
+    "model_name": "random_body_001",
+    "case_type": "RectangularBodySpec",
+    "model_shape": [
+        24,
+        64,
+        64
+    ],
+    "model_dtype": "float32",
+    "axis_order": [
+        "z",
+        "y",
+        "x"
+    ],
+    "flattening_order": "C",
+    "grid": {
+        "nx": 64,
+        "ny": 64,
+        "nz": 24,
+        "x_min": 0.0,
+        "x_max": 630.0,
+        "y_min": 0.0,
+        "y_max": 630.0,
+        "z_min": 0.0,
+        "z_max": 23.0
+    },
+    "body": {
+        "name": "random_body_001",
+        "z_start": 0,
+        "z_end": 5,
+        "x_start": 11,
+        "x_end": 21,
+        "y_start": 45,
+        "y_end": 55,
+        "density_contrast": 0.5
+    }
+}

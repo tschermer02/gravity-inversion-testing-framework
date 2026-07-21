@@ -1,0 +1,39 @@
+{
+    "model_name": "steep_dike_70_deg",
+    "case_type": "DippingBodySpec",
+    "model_shape": [
+        24,
+        64,
+        64
+    ],
+    "model_dtype": "float32",
+    "axis_order": [
+        "z",
+        "y",
+        "x"
+    ],
+    "flattening_order": "C",
+    "grid": {
+        "nx": 64,
+        "ny": 64,
+        "nz": 24,
+        "x_min": 0.0,
+        "x_max": 630.0,
+        "y_min": 0.0,
+        "y_max": 630.0,
+        "z_min": 0.0,
+        "z_max": 23.0
+    },
+    "body": {
+        "name": "steep_dike_70_deg",
+        "center_x": 21.07818128993102,
+        "center_y": 32.0,
+        "center_z": 11.457233587073175,
+        "strike_length": 18.0,
+        "dip_length": 18.0,
+        "thickness": 2.5,
+        "strike_degrees": 0.0,
+        "dip_degrees": 70.0,
+        "density_contrast": 0.5
+    }
+}

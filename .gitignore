@@ -1,0 +1,47 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Generated results
+results/*.npy
+results/*.npz
+results/*.h5
+results/*.hdf5
+
+# Generated synthetic outputs
+synthetic_models/**/figures/*
+synthetic_models/**/cnn_outputs/*
+synthetic_models/**/forward_responses/*
+
+# VS Code cache
+.vscode/.ropeproject
+
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+.vscode/
+.idea/
+
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Build
+build/
+dist/
+
+# Generated experiment outputs
+results/
+figures/
+*.log

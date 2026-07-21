@@ -1,0 +1,42 @@
+{
+    "model_name": "tapered_salt_dome_negative",
+    "case_type": "SaltDomeSpec",
+    "model_shape": [
+        24,
+        64,
+        64
+    ],
+    "model_dtype": "float32",
+    "axis_order": [
+        "z",
+        "y",
+        "x"
+    ],
+    "flattening_order": "C",
+    "grid": {
+        "nx": 64,
+        "ny": 64,
+        "nz": 24,
+        "x_min": 0.0,
+        "x_max": 630.0,
+        "y_min": 0.0,
+        "y_max": 630.0,
+        "z_min": 0.0,
+        "z_max": 23.0
+    },
+    "body": {
+        "name": "tapered_salt_dome_negative",
+        "center_x": 32.0,
+        "center_y": 32.0,
+        "top_depth": 2.0,
+        "bottom_depth": 21.0,
+        "stem_radius_x": 8.0,
+        "stem_radius_y": 8.0,
+        "bulb_additional_radius_x": 0.0,
+        "bulb_additional_radius_y": 0.0,
+        "bulb_center_depth": 11.5,
+        "bulb_vertical_scale": 4.75,
+        "taper_fraction": 0.55,
+        "density_contrast": -0.5
+    }
+}

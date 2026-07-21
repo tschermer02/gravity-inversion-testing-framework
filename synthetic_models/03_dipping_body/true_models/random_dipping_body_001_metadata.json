@@ -1,0 +1,39 @@
+{
+    "model_name": "random_dipping_body_001",
+    "case_type": "DippingBodySpec",
+    "model_shape": [
+        24,
+        64,
+        64
+    ],
+    "model_dtype": "float32",
+    "axis_order": [
+        "z",
+        "y",
+        "x"
+    ],
+    "flattening_order": "C",
+    "grid": {
+        "nx": 64,
+        "ny": 64,
+        "nz": 24,
+        "x_min": 0.0,
+        "x_max": 630.0,
+        "y_min": 0.0,
+        "y_max": 630.0,
+        "z_min": 0.0,
+        "z_max": 23.0
+    },
+    "body": {
+        "name": "random_dipping_body_001",
+        "center_x": 39.43591440090495,
+        "center_y": 47.8504603837021,
+        "center_z": 7.322158862972347,
+        "strike_length": 20.31254837995249,
+        "dip_length": 8.300129062672003,
+        "thickness": 2.8250879551073576,
+        "strike_degrees": 40.1779328667881,
+        "dip_degrees": 62.870628920660806,
+        "density_contrast": 0.5
+    }
+}

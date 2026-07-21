@@ -1,0 +1,39 @@
+{
+    "model_name": "elongated_prism_45_deg",
+    "case_type": "DippingBodySpec",
+    "model_shape": [
+        24,
+        64,
+        64
+    ],
+    "model_dtype": "float32",
+    "axis_order": [
+        "z",
+        "y",
+        "x"
+    ],
+    "flattening_order": "C",
+    "grid": {
+        "nx": 64,
+        "ny": 64,
+        "nz": 24,
+        "x_min": 0.0,
+        "x_max": 630.0,
+        "y_min": 0.0,
+        "y_max": 630.0,
+        "z_min": 0.0,
+        "z_max": 23.0
+    },
+    "body": {
+        "name": "elongated_prism_45_deg",
+        "center_x": 32.0,
+        "center_y": 32.0,
+        "center_z": 12.0,
+        "strike_length": 24.0,
+        "dip_length": 10.0,
+        "thickness": 4.0,
+        "strike_degrees": 45.0,
+        "dip_degrees": 45.0,
+        "density_contrast": 0.5
+    }
+}

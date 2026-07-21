@@ -1,0 +1,45 @@
+{
+    "model_name": "circular_basement_uplift",
+    "case_type": "BasementReliefSpec",
+    "model_shape": [
+        24,
+        64,
+        64
+    ],
+    "model_dtype": "float32",
+    "axis_order": [
+        "z",
+        "y",
+        "x"
+    ],
+    "flattening_order": "C",
+    "grid": {
+        "nx": 64,
+        "ny": 64,
+        "nz": 24,
+        "x_min": 0.0,
+        "x_max": 630.0,
+        "y_min": 0.0,
+        "y_max": 630.0,
+        "z_min": 0.0,
+        "z_max": 23.0
+    },
+    "body": {
+        "name": "circular_basement_uplift",
+        "base_depth": 17.0,
+        "reference_x": 32.0,
+        "reference_y": 32.0,
+        "slope_x": 0.0,
+        "slope_y": 0.0,
+        "gaussian_amplitude": -8.0,
+        "gaussian_center_x": 32.0,
+        "gaussian_center_y": 32.0,
+        "gaussian_scale_x": 10.0,
+        "gaussian_scale_y": 10.0,
+        "sinusoid_amplitude": 0.0,
+        "sinusoid_wavelength": 1.0,
+        "sinusoid_azimuth_degrees": 0.0,
+        "sinusoid_phase_degrees": 0.0,
+        "density_contrast": 0.5
+    }
+}

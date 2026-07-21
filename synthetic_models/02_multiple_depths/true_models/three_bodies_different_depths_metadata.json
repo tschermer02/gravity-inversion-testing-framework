@@ -1,0 +1,63 @@
+{
+    "model_name": "three_bodies_different_depths",
+    "case_type": "MultiBodyCaseSpec",
+    "model_shape": [
+        24,
+        64,
+        64
+    ],
+    "model_dtype": "float32",
+    "axis_order": [
+        "z",
+        "y",
+        "x"
+    ],
+    "flattening_order": "C",
+    "grid": {
+        "nx": 64,
+        "ny": 64,
+        "nz": 24,
+        "x_min": 0.0,
+        "x_max": 630.0,
+        "y_min": 0.0,
+        "y_max": 630.0,
+        "z_min": 0.0,
+        "z_max": 23.0
+    },
+    "body": {
+        "name": "three_bodies_different_depths",
+        "bodies": [
+            {
+                "name": "shallow_left_body",
+                "z_start": 2,
+                "z_end": 7,
+                "x_start": 8,
+                "x_end": 18,
+                "y_start": 27,
+                "y_end": 37,
+                "density_contrast": 0.5
+            },
+            {
+                "name": "medium_center_body",
+                "z_start": 9,
+                "z_end": 14,
+                "x_start": 27,
+                "x_end": 37,
+                "y_start": 27,
+                "y_end": 37,
+                "density_contrast": 0.5
+            },
+            {
+                "name": "deep_right_body",
+                "z_start": 16,
+                "z_end": 21,
+                "x_start": 46,
+                "x_end": 56,
+                "y_start": 27,
+                "y_end": 37,
+                "density_contrast": 0.5
+            }
+        ],
+        "allow_overlap": false
+    }
+}
