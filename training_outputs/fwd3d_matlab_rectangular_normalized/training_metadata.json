@@ -1,0 +1,47 @@
+{
+  "training_configuration": {
+    "dataset_directory": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\datasets\\fwd3d_matlab_rectangular_baseline",
+    "output_directory": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\training_outputs\\fwd3d_matlab_rectangular_normalized",
+    "batch_size": 2,
+    "epochs": 20,
+    "background_loss_weight": 1.0,
+    "body_loss_weight": 50.0,
+    "gravity_scale": 10.0,
+    "density_scale": 1.0,
+    "random_seed": 20260727,
+    "base_filters": 8,
+    "learning_rate": 0.001,
+    "output_activation": "sigmoid",
+    "overwrite": true
+  },
+  "model_name": "baseline_fwd3d_inversion_cnn",
+  "model_input_shape": [
+    null,
+    8,
+    64,
+    64,
+    1
+  ],
+  "model_output_shape": [
+    null,
+    24,
+    64,
+    64,
+    1
+  ],
+  "trainable_parameters": 83345,
+  "split_counts": {
+    "train": 800,
+    "validation": 100,
+    "test": 100
+  },
+  "elapsed_seconds": 219.2964193999651,
+  "final_metrics": {
+    "density_mae": 0.0029205235186964273,
+    "density_mse": 0.0020616177935153246,
+    "loss": 0.10308091342449188
+  },
+  "loss": "mean_squared_error",
+  "explicit_regularization": null,
+  "observational_noise": null
+}

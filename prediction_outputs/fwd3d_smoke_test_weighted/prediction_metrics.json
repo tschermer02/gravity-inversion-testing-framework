@@ -1,0 +1,21 @@
+[
+  {
+    "sample_index": 0,
+    "sample_path": "samples/sample_000003.npz",
+    "prediction_path": "sample_000003_prediction.npz",
+    "figure_path": "sample_000003_comparison.png",
+    "mse": 0.006120380479842424,
+    "mae": 0.016841715201735497,
+    "correlation": 0.36858282266489556,
+    "threshold": 0.1,
+    "true_occupied_cells": 420,
+    "predicted_occupied_cells": 4775,
+    "intersection_cells": 420,
+    "union_cells": 4775,
+    "iou": 0.08795811518324607,
+    "dice": 0.1616939364773821,
+    "prediction_minimum": 3.527777198278721e-33,
+    "prediction_maximum": 0.5033135414123535,
+    "prediction_mean": 0.01842239685356617
+  }
+]

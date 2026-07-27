@@ -1,0 +1,24 @@
+{
+  "random_seed": 20260727,
+  "total_samples": 1000,
+  "requested_fractions": {
+    "train": 0.8,
+    "validation": 0.1,
+    "test": 0.1
+  },
+  "sample_counts": {
+    "train": 800,
+    "validation": 100,
+    "test": 100
+  },
+  "actual_fractions": {
+    "train": 0.8,
+    "validation": 0.1,
+    "test": 0.1
+  },
+  "split_manifests": {
+    "train": "train_manifest.csv",
+    "validation": "validation_manifest.csv",
+    "test": "test_manifest.csv"
+  }
+}

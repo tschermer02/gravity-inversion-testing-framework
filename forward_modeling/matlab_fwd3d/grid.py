@@ -493,3 +493,140 @@ class ModelGrid:
             model_array,
             dtype=np.float64,
         ).ravel(order="C")
+
+def model_grid_from_matlab_bounds(
+    *,
+    bounds: tuple[
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+    ],
+    dx: float,
+    dy: float,
+    dz: float,
+) -> ModelGrid:
+    """
+    Build an FWD3D ModelGrid from MATLAB-style cell-edge bounds.
+
+    Parameters
+    ----------
+    bounds
+        Bounds in MATLAB order:
+
+        ``(xmin, xmax, ymin, ymax, zmin, zmax)``
+
+        These values describe cell edges, not cell centers.
+    dx, dy, dz
+        Uniform cell dimensions in meters.
+
+    Returns
+    -------
+    ModelGrid
+        Cell-centered FWD3D model grid.
+    """
+
+    (
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+        z_min,
+        z_max,
+    ) = bounds
+
+    if dx <= 0.0:
+        raise ValueError(
+            "dx must be greater than zero."
+        )
+
+    if dy <= 0.0:
+        raise ValueError(
+            "dy must be greater than zero."
+        )
+
+    if dz <= 0.0:
+        raise ValueError(
+            "dz must be greater than zero."
+        )
+
+    x_extent = x_max - x_min
+    y_extent = y_max - y_min
+    z_extent = z_max - z_min
+
+    nx_float = x_extent / dx
+    ny_float = y_extent / dy
+    nz_float = z_extent / dz
+
+    if not np.isclose(
+        nx_float,
+        round(nx_float),
+    ):
+        raise ValueError(
+            "The X extent must be evenly divisible by dx."
+        )
+
+    if not np.isclose(
+        ny_float,
+        round(ny_float),
+    ):
+        raise ValueError(
+            "The Y extent must be evenly divisible by dy."
+        )
+
+    if not np.isclose(
+        nz_float,
+        round(nz_float),
+    ):
+        raise ValueError(
+            "The Z extent must be evenly divisible by dz."
+        )
+
+    nx = int(round(nx_float))
+    ny = int(round(ny_float))
+    nz = int(round(nz_float))
+
+    x_centers = (
+        x_min
+        + dx / 2.0
+        + np.arange(
+            nx,
+            dtype=np.float64,
+        )
+        * dx
+    )
+
+    y_centers = (
+        y_min
+        + dy / 2.0
+        + np.arange(
+            ny,
+            dtype=np.float64,
+        )
+        * dy
+    )
+
+    z_centers = (
+        z_min
+        + dz / 2.0
+        + np.arange(
+            nz,
+            dtype=np.float64,
+        )
+        * dz
+    )
+
+    return ModelGrid(
+        x_centers=x_centers,
+        y_centers=y_centers,
+        z_centers=z_centers,
+        dx=dx,
+        dy=dy,
+        dz=np.full(
+            nz,
+            dz,
+            dtype=np.float64,
+        ),
+    )
