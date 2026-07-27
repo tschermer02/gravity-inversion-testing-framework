@@ -4,6 +4,21 @@ import numpy as np
 from pathlib import Path
 import os
 
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from evaluation.plotting import (
+    plot_published_example_density_comparison,
+)
+from synthetic_models.common.grid import GridSpec
+
+
 # DataReader.py is a local file in this repository.
 # It contains functions for loading and reshaping the gravity anomaly data.
 import DataReader as dr
@@ -28,12 +43,19 @@ TEST_DATA_DIR = REPO_ROOT / "test_data"
 input_pre_anomal = TEST_DATA_DIR / "anomal_one.txt"
 model_weight_save_path = TEST_DATA_DIR / "3Dmodel_weight3by3.h5"
 model_save_path = TEST_DATA_DIR / "3Dpredict_model_one.txt"
+true_model_path = TEST_DATA_DIR / "model_one.txt"
 
 FIGURE_DIR = REPO_ROOT / "reproduced_example" / "figures"
 FIGURE_DIR.mkdir(parents=True, exist_ok=True)
 
 anomaly_figure_path = FIGURE_DIR / "input_gravity_anomaly.png"
 model_figure_path = FIGURE_DIR / "predicted_density_model.png"
+
+test_model_path = TEST_DATA_DIR / "models_dataset_t.txt"
+test_anomaly_path = TEST_DATA_DIR / "anomal_dataset_t.txt"
+test_spacing_path = TEST_DATA_DIR / "dxdydz_dataset_t.txt"
+
+sample_index = 80
 
 # Select the visible GPU ("0" = first GPU, "2" = third GPU).
 # Remove this line for CPU use. Ideally set it before importing TensorFlow.
@@ -71,6 +93,8 @@ if not input_pre_anomal.exists():
 if not model_weight_save_path.exists():
     raise FileNotFoundError(model_weight_save_path)
 
+if not true_model_path.exists():
+    raise FileNotFoundError(true_model_path)
 # ---------------------------------------------------------------------------
 # ORIGINAL DATA GRID DIMENSIONS
 # ---------------------------------------------------------------------------
@@ -142,6 +166,7 @@ print("Minimum:", np.min(anomal))
 print("Maximum:", np.max(anomal))
 print("Mean:", np.mean(anomal))
 print("Contains NaN:", np.isnan(anomal).any())
+print("True model file:", true_model_path)
 
 # ---------------------------------------------------------------------------
 # CALCULATE GRID SPACING
@@ -183,6 +208,33 @@ anomal = ds.anomal_tran_deltz(anomal, dz)
 print("\nAfter dz scaling:")
 print("Minimum:", np.min(anomal))
 print("Maximum:", np.max(anomal))
+
+all_true_models, all_anomalies = dr.load_3Ddata(
+    test_model_path,
+    test_anomaly_path,
+    Nx,
+    Ny,
+    Nz,
+)
+
+all_dxdy, all_dz = dr.load_3Ddata_dxdydz(
+    test_spacing_path
+)
+
+true_model = np.asarray(
+    all_true_models[sample_index],
+    dtype=np.float32,
+)
+
+anomal = np.asarray(
+    all_anomalies[sample_index:sample_index + 1],
+    dtype=np.float32,
+)
+
+dxdy = np.asarray(
+    all_dxdy[sample_index:sample_index + 1],
+    dtype=np.float32,
+)
 
 # ---------------------------------------------------------------------------
 # BUILD THE CNN AND RUN THE INVERSION
@@ -227,6 +279,21 @@ with strategy.scope():
     # Print a message indicating that the results will now be plotted.
     print("plot result\n")
 
+
+grid = GridSpec()
+
+comparison_figure_path = (
+    FIGURE_DIR
+    / "published_example_true_recovered_comparison.png"
+)
+
+plot_published_example_density_comparison(
+    true_model=true_model,
+    recovered_model=d_model_p[0],
+    grid=grid,
+    output_path=comparison_figure_path,
+    case_name="Published Example Reproduction",
+)
 
 # ---------------------------------------------------------------------------
 # PLOT THE INPUT GRAVITY ANOMALY

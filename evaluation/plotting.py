@@ -203,7 +203,7 @@ def plot_gravity_comparison(
             aspect="equal",
             vmin=-global_limit,
             vmax=global_limit,
-            cmap="RdBu_r",
+            cmap="viridis",
         )
 
         peak_y_index, peak_x_index = np.unravel_index(
@@ -2153,4 +2153,296 @@ def _plot_snr_metric(
         linewidth=0.7,
     )
 
+def plot_published_example_density_comparison(
+    true_model: np.ndarray,
+    recovered_model: np.ndarray,
+    grid: GridSpec,
+    output_path: Path,
+    case_name: str = "Published Example",
+) -> None:
+    """
+    Plot true, recovered, and residual density-model projections.
 
+    This function is intended for the published reproduction example, where
+    true and recovered density arrays are available but no synthetic
+    ``CaseSpec`` exists.
+
+    The figure contains three columns:
+
+    1. True density model.
+    2. CNN-recovered density model.
+    3. Residual, defined as recovered minus true.
+
+    The rows show maximum-magnitude projections onto the XY, XZ, and YZ
+    planes.
+
+    Parameters
+    ----------
+    true_model
+        True density model with shape ``(nz, ny, nx)``.
+
+    recovered_model
+        CNN-recovered density model with shape ``(nz, ny, nx)``.
+
+    grid
+        Grid specification defining model dimensions and physical extents.
+
+    output_path
+        Path where the figure will be saved.
+
+    case_name
+        Name displayed in the figure title.
+
+    Raises
+    ------
+    ValueError
+        If either model has an incorrect shape or contains non-finite values.
+    RuntimeError
+        If the plotting images are not successfully created.
+    """
+    expected_shape = (
+        grid.nz,
+        grid.ny,
+        grid.nx,
+    )
+
+    normalized_models: dict[str, np.ndarray] = {}
+
+    for model_name, model in {
+        "true": true_model,
+        "recovered": recovered_model,
+    }.items():
+        normalized_model = np.ascontiguousarray(
+            np.asarray(
+                model,
+                dtype=np.float32,
+            )
+        )
+
+        if normalized_model.shape != expected_shape:
+            raise ValueError(
+                f"{case_name}: expected {model_name} model shape "
+                f"{expected_shape}, but received "
+                f"{normalized_model.shape}."
+            )
+
+        if not np.all(np.isfinite(normalized_model)):
+            raise ValueError(
+                f"{case_name}: {model_name} model contains "
+                "NaN or infinite values."
+            )
+
+        normalized_models[model_name] = normalized_model
+
+    true_model = normalized_models["true"]
+    recovered_model = normalized_models["recovered"]
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    # Positive residual values indicate overprediction by the CNN.
+    # Negative values indicate underprediction.
+    residual = recovered_model - true_model
+
+    true_xy = np.max(true_model, axis=0)
+    recovered_xy = np.max(recovered_model, axis=0)
+    residual_xy = recovered_xy - true_xy
+
+    true_xz = np.max(true_model, axis=2)
+    recovered_xz = np.max(recovered_model, axis=2)
+    residual_xz = recovered_xz - true_xz
+
+    true_yz = np.max(true_model, axis=1)
+    recovered_yz = np.max(recovered_model, axis=1)
+    residual_yz = recovered_yz - true_yz
+
+    slice_description = "Maximum-value projections"
+
+    density_limit = float(
+        max(
+            np.max(np.abs(true_model)),
+            np.max(np.abs(recovered_model)),
+        )
+    )
+
+    if np.isclose(density_limit, 0.0):
+        density_limit = 1.0
+
+    residual_limit = float(
+        max(
+            np.max(np.abs(residual_xy)),
+            np.max(np.abs(residual_xz)),
+            np.max(np.abs(residual_yz)),
+        )
+    )
+
+    if np.isclose(residual_limit, 0.0):
+        residual_limit = 1.0
+
+    xy_extent = (
+        grid.x_min,
+        grid.x_max,
+        grid.y_min,
+        grid.y_max,
+    )
+
+    xz_extent = (
+        grid.x_min,
+        grid.x_max,
+        grid.z_max,
+        grid.z_min,
+    )
+
+    yz_extent = (
+        grid.y_min,
+        grid.y_max,
+        grid.z_max,
+        grid.z_min,
+    )
+
+    density_images = [
+        (true_xy, recovered_xy),
+        (true_xz, recovered_xz),
+        (true_yz, recovered_yz),
+    ]
+
+    residual_images = [
+        residual_xy,
+        residual_xz,
+        residual_yz,
+    ]
+
+    extents = [
+        xy_extent,
+        xz_extent,
+        yz_extent,
+    ]
+
+    aspects = [
+        "equal",
+        "auto",
+        "auto",
+    ]
+
+    axis_labels = [
+        ("x", "y"),
+        ("x", "Depth"),
+        ("y", "Depth"),
+    ]
+
+    row_labels = [
+        "XY",
+        "XZ",
+        "YZ",
+    ]
+
+    figure, axes = plt.subplots(
+        nrows=3,
+        ncols=3,
+        figsize=(12, 12),
+        constrained_layout=True,
+    )
+
+    density_image = None
+    residual_image = None
+
+    for row_index in range(3):
+        true_view, recovered_view = density_images[row_index]
+        residual_view = residual_images[row_index]
+
+        origin = (
+            "lower"
+            if row_index == 0
+            else "upper"
+        )
+
+        density_image = axes[row_index, 0].imshow(
+            true_view,
+            origin=origin,
+            extent=extents[row_index],
+            aspect=aspects[row_index],
+            cmap="viridis",
+            vmin=0,
+            vmax=density_limit,
+        )
+
+        axes[row_index, 1].imshow(
+            recovered_view,
+            origin=origin,
+            extent=extents[row_index],
+            aspect=aspects[row_index],
+            cmap="viridis",
+            vmin=0,
+            vmax=density_limit,
+        )
+
+        residual_image = axes[row_index, 2].imshow(
+            residual_view,
+            origin=origin,
+            extent=extents[row_index],
+            aspect=aspects[row_index],
+            cmap="RdBu_r",
+            vmin=-residual_limit,
+            vmax=residual_limit,
+        )
+
+        x_label, y_label = axis_labels[row_index]
+
+        for column_index in range(3):
+            axes[row_index, column_index].set_xlabel(
+                x_label
+            )
+            axes[row_index, column_index].set_ylabel(
+                y_label
+            )
+
+        axes[row_index, 0].text(
+            -0.18,
+            0.5,
+            row_labels[row_index],
+            transform=axes[row_index, 0].transAxes,
+            rotation=90,
+            verticalalignment="center",
+            horizontalalignment="center",
+            fontweight="bold",
+        )
+
+    axes[0, 0].set_title("True")
+    axes[0, 1].set_title("Recovered")
+    axes[0, 2].set_title("Residual")
+
+    if density_image is None or residual_image is None:
+        plt.close(figure)
+        raise RuntimeError(
+            "Published-example comparison images were not created."
+        )
+
+    figure.colorbar(
+        density_image,
+        ax=axes[:, :2],
+        shrink=0.85,
+        label="Density contrast",
+    )
+
+    figure.colorbar(
+        residual_image,
+        ax=axes[:, 2],
+        shrink=0.85,
+        label="Recovered - true",
+    )
+
+    figure.suptitle(
+        f"{case_name}\n{slice_description}",
+        fontsize=14,
+    )
+
+    figure.savefig(
+        output_path,
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+    plt.close(figure)

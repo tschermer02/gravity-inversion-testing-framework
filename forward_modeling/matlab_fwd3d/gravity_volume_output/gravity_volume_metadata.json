@@ -1,0 +1,60 @@
+{
+  "density_model_shape": [
+    5,
+    20,
+    20
+  ],
+  "gravity_volume_shape": [
+    8,
+    11,
+    11
+  ],
+  "gravity_channel": 4,
+  "gravity_component": "Gz",
+  "gravity_unit": "mGal",
+  "receiver_x": [
+    -250.0,
+    -200.0,
+    -150.0,
+    -100.0,
+    -50.0,
+    0.0,
+    50.0,
+    100.0,
+    150.0,
+    200.0,
+    250.0
+  ],
+  "receiver_y": [
+    -250.0,
+    -200.0,
+    -150.0,
+    -100.0,
+    -50.0,
+    0.0,
+    50.0,
+    100.0,
+    150.0,
+    200.0,
+    250.0
+  ],
+  "receiver_z": [
+    -10.0,
+    -20.0,
+    -30.0,
+    -40.0,
+    -50.0,
+    -60.0,
+    -70.0,
+    -80.0
+  ],
+  "array_order": {
+    "density": "density[z, y, x]",
+    "gravity": "gravity[z_receiver, y_receiver, x_receiver]"
+  },
+  "coordinate_convention": {
+    "x": "positive east",
+    "y": "positive north",
+    "z": "positive downward"
+  }
+}
