@@ -1,0 +1,52 @@
+{
+  "training_configuration": {
+    "dataset_directory": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\datasets\\fwd3d_matlab_edge_rectangular_baseline",
+    "output_directory": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\training_outputs\\normalization_smoke_test",
+    "batch_size": 2,
+    "epochs": 1,
+    "body_loss_fraction": 0.5,
+    "gravity_scale": 0.13978365063667297,
+    "gravity_scale_summary": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\datasets\\fwd3d_matlab_edge_rectangular_baseline\\training_gravity_distribution.json",
+    "gravity_scale_method": "percentile_99",
+    "density_scale": 1.0,
+    "random_seed": 20260727,
+    "base_filters": 8,
+    "learning_rate": 0.001,
+    "output_activation": "sigmoid",
+    "overwrite": true
+  },
+  "model_name": "baseline_fwd3d_inversion_cnn",
+  "model_input_shape": [
+    null,
+    8,
+    64,
+    64,
+    1
+  ],
+  "model_output_shape": [
+    null,
+    24,
+    64,
+    64,
+    1
+  ],
+  "trainable_parameters": 88489,
+  "split_counts": {
+    "train": 800,
+    "validation": 100,
+    "test": 100
+  },
+  "elapsed_seconds": 26.286196400003973,
+  "final_metrics": {
+    "density_mae": 0.002928178058937192,
+    "density_mse": 0.0020621202420443296,
+    "loss": 0.20785091817378998
+  },
+  "loss": {
+    "name": "balanced_density_mse",
+    "body_fraction": 0.5,
+    "background_fraction": 0.5
+  },
+  "explicit_regularization": null,
+  "observational_noise": null
+}

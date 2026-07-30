@@ -1,0 +1,118 @@
+
+Generating FWD3D baseline dataset
+===================================
+Samples: 1,000
+Density shape: (24, 64, 64)
+Gravity shape: (8, 64, 64)
+Output: C:\Users\tsche\Code\00_gravity_inversion_cnn_test\datasets\E03_shallow_depth_baseline
+
+[     1/1,000] 0.064 s/sample | estimated remaining 64.3 s
+[    10/1,000] 0.199 s/sample | estimated remaining 196.6 s
+[    20/1,000] 0.433 s/sample | estimated remaining 423.9 s
+[    30/1,000] 0.385 s/sample | estimated remaining 373.9 s
+[    40/1,000] 0.336 s/sample | estimated remaining 322.6 s
+[    50/1,000] 0.291 s/sample | estimated remaining 276.8 s
+[    60/1,000] 0.288 s/sample | estimated remaining 271.2 s
+[    70/1,000] 0.305 s/sample | estimated remaining 284.0 s
+[    80/1,000] 0.306 s/sample | estimated remaining 281.6 s
+[    90/1,000] 0.302 s/sample | estimated remaining 275.2 s
+[   100/1,000] 0.287 s/sample | estimated remaining 257.9 s
+[   110/1,000] 0.271 s/sample | estimated remaining 241.4 s
+[   120/1,000] 0.259 s/sample | estimated remaining 227.7 s
+[   130/1,000] 0.250 s/sample | estimated remaining 217.9 s
+[   140/1,000] 0.253 s/sample | estimated remaining 217.2 s
+[   150/1,000] 0.265 s/sample | estimated remaining 225.0 s
+[   160/1,000] 0.255 s/sample | estimated remaining 214.5 s
+[   170/1,000] 0.257 s/sample | estimated remaining 213.0 s
+[   180/1,000] 0.250 s/sample | estimated remaining 204.8 s
+[   190/1,000] 0.243 s/sample | estimated remaining 197.1 s
+[   200/1,000] 0.239 s/sample | estimated remaining 190.9 s
+[   210/1,000] 0.243 s/sample | estimated remaining 192.3 s
+[   220/1,000] 0.240 s/sample | estimated remaining 187.0 s
+[   230/1,000] 0.235 s/sample | estimated remaining 180.8 s
+[   240/1,000] 0.247 s/sample | estimated remaining 187.7 s
+[   250/1,000] 0.250 s/sample | estimated remaining 187.4 s
+[   260/1,000] 0.254 s/sample | estimated remaining 187.9 s
+[   270/1,000] 0.256 s/sample | estimated remaining 187.1 s
+[   280/1,000] 0.251 s/sample | estimated remaining 180.4 s
+[   290/1,000] 0.251 s/sample | estimated remaining 178.2 s
+[   300/1,000] 0.257 s/sample | estimated remaining 179.8 s
+[   310/1,000] 0.254 s/sample | estimated remaining 175.5 s
+[   320/1,000] 0.258 s/sample | estimated remaining 175.6 s
+[   330/1,000] 0.268 s/sample | estimated remaining 179.4 s
+[   340/1,000] 0.263 s/sample | estimated remaining 173.5 s
+[   350/1,000] 0.259 s/sample | estimated remaining 168.5 s
+[   360/1,000] 0.259 s/sample | estimated remaining 165.5 s
+[   370/1,000] 0.258 s/sample | estimated remaining 162.6 s
+[   380/1,000] 0.258 s/sample | estimated remaining 160.1 s
+[   390/1,000] 0.262 s/sample | estimated remaining 160.0 s
+[   400/1,000] 0.265 s/sample | estimated remaining 159.0 s
+[   410/1,000] 0.261 s/sample | estimated remaining 154.0 s
+[   420/1,000] 0.266 s/sample | estimated remaining 154.2 s
+[   430/1,000] 0.275 s/sample | estimated remaining 156.7 s
+[   440/1,000] 0.271 s/sample | estimated remaining 151.7 s
+[   450/1,000] 0.267 s/sample | estimated remaining 146.9 s
+[   460/1,000] 0.265 s/sample | estimated remaining 142.9 s
+[   470/1,000] 0.265 s/sample | estimated remaining 140.5 s
+[   480/1,000] 0.262 s/sample | estimated remaining 136.2 s
+[   490/1,000] 0.262 s/sample | estimated remaining 133.4 s
+[   500/1,000] 0.264 s/sample | estimated remaining 132.2 s
+[   510/1,000] 0.261 s/sample | estimated remaining 127.9 s
+[   520/1,000] 0.260 s/sample | estimated remaining 124.9 s
+[   530/1,000] 0.260 s/sample | estimated remaining 122.4 s
+[   540/1,000] 0.263 s/sample | estimated remaining 121.1 s
+[   550/1,000] 0.263 s/sample | estimated remaining 118.2 s
+[   560/1,000] 0.261 s/sample | estimated remaining 115.0 s
+[   570/1,000] 0.259 s/sample | estimated remaining 111.2 s
+[   580/1,000] 0.257 s/sample | estimated remaining 107.8 s
+[   590/1,000] 0.257 s/sample | estimated remaining 105.2 s
+[   600/1,000] 0.259 s/sample | estimated remaining 103.7 s
+[   610/1,000] 0.263 s/sample | estimated remaining 102.5 s
+[   620/1,000] 0.266 s/sample | estimated remaining 100.9 s
+[   630/1,000] 0.269 s/sample | estimated remaining 99.7 s
+[   640/1,000] 0.267 s/sample | estimated remaining 96.1 s
+[   650/1,000] 0.267 s/sample | estimated remaining 93.5 s
+[   660/1,000] 0.267 s/sample | estimated remaining 90.8 s
+[   670/1,000] 0.267 s/sample | estimated remaining 88.1 s
+[   680/1,000] 0.265 s/sample | estimated remaining 84.9 s
+[   690/1,000] 0.266 s/sample | estimated remaining 82.3 s
+[   700/1,000] 0.270 s/sample | estimated remaining 80.9 s
+[   710/1,000] 0.271 s/sample | estimated remaining 78.6 s
+[   720/1,000] 0.276 s/sample | estimated remaining 77.2 s
+[   730/1,000] 0.275 s/sample | estimated remaining 74.2 s
+[   740/1,000] 0.273 s/sample | estimated remaining 71.0 s
+[   750/1,000] 0.275 s/sample | estimated remaining 68.7 s
+[   760/1,000] 0.276 s/sample | estimated remaining 66.3 s
+[   770/1,000] 0.275 s/sample | estimated remaining 63.3 s
+[   780/1,000] 0.277 s/sample | estimated remaining 60.9 s
+[   790/1,000] 0.278 s/sample | estimated remaining 58.4 s
+[   800/1,000] 0.282 s/sample | estimated remaining 56.5 s
+[   810/1,000] 0.287 s/sample | estimated remaining 54.5 s
+[   820/1,000] 0.288 s/sample | estimated remaining 51.8 s
+[   830/1,000] 0.289 s/sample | estimated remaining 49.2 s
+[   840/1,000] 0.294 s/sample | estimated remaining 47.1 s
+[   850/1,000] 0.295 s/sample | estimated remaining 44.2 s
+[   860/1,000] 0.299 s/sample | estimated remaining 41.8 s
+[   870/1,000] 0.309 s/sample | estimated remaining 40.1 s
+[   880/1,000] 0.316 s/sample | estimated remaining 38.0 s
+[   890/1,000] 0.323 s/sample | estimated remaining 35.5 s
+[   900/1,000] 0.322 s/sample | estimated remaining 32.2 s
+[   910/1,000] 0.324 s/sample | estimated remaining 29.2 s
+[   920/1,000] 0.323 s/sample | estimated remaining 25.9 s
+[   930/1,000] 0.324 s/sample | estimated remaining 22.7 s
+[   940/1,000] 0.325 s/sample | estimated remaining 19.5 s
+[   950/1,000] 0.326 s/sample | estimated remaining 16.3 s
+[   960/1,000] 0.330 s/sample | estimated remaining 13.2 s
+[   970/1,000] 0.332 s/sample | estimated remaining 10.0 s
+[   980/1,000] 0.333 s/sample | estimated remaining 6.7 s
+[   990/1,000] 0.336 s/sample | estimated remaining 3.4 s
+[ 1,000/1,000] 0.337 s/sample | estimated remaining 0.0 s
+
+Dataset generation complete
+===========================
+Generated samples: 1,000
+Total time: 337.23 seconds
+Mean time per sample: 0.337 seconds
+Samples directory: C:\Users\tsche\Code\00_gravity_inversion_cnn_test\datasets\E03_shallow_depth_baseline\samples
+Manifest: C:\Users\tsche\Code\00_gravity_inversion_cnn_test\datasets\E03_shallow_depth_baseline\manifest.csv
+Metadata: C:\Users\tsche\Code\00_gravity_inversion_cnn_test\datasets\E03_shallow_depth_baseline\metadata.json

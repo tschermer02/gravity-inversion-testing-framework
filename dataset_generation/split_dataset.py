@@ -70,6 +70,46 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--train-count",
+        type=int,
+        default=None,
+        help=(
+            "Optional exact training count. Must be supplied together "
+            "with --validation-count and --test-count."
+        ),
+    )
+
+    parser.add_argument(
+        "--validation-count",
+        type=int,
+        default=None,
+        help=(
+            "Optional exact validation count. Must be supplied together "
+            "with --train-count and --test-count."
+        ),
+    )
+
+    parser.add_argument(
+        "--test-count",
+        type=int,
+        default=None,
+        help=(
+            "Optional exact test count. Must be supplied together "
+            "with --train-count and --validation-count."
+        ),
+    )
+
+    parser.add_argument(
+        "--holdout-dataset",
+        type=Path,
+        default=None,
+        help=(
+            "Optional reference dataset whose validation and test sample "
+            "identities are preserved. Requires explicit split counts."
+        ),
+    )
+
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace existing split manifest files.",
@@ -256,6 +296,63 @@ def calculate_split_counts(
     )
 
 
+def validate_explicit_split_counts(
+    *,
+    number_of_samples: int,
+    train_count: int,
+    validation_count: int,
+    test_count: int,
+) -> tuple[int, int, int]:
+    """
+    Validate exact requested dataset split counts.
+
+    Parameters
+    ----------
+    number_of_samples
+        Number of rows in the complete manifest.
+    train_count, validation_count, test_count
+        Requested positive sample counts.
+
+    Returns
+    -------
+    tuple
+        Validated training, validation, and test counts.
+    """
+
+    counts = {
+        "train_count": train_count,
+        "validation_count": (
+            validation_count
+        ),
+        "test_count": test_count,
+    }
+
+    for name, value in counts.items():
+        if value < 1:
+            raise ValueError(
+                f"{name} must be at least one."
+            )
+
+    requested_total = (
+        train_count
+        + validation_count
+        + test_count
+    )
+
+    if requested_total != number_of_samples:
+        raise ValueError(
+            "Explicit split counts must sum to the manifest length. "
+            f"Received {requested_total:,} for "
+            f"{number_of_samples:,} samples."
+        )
+
+    return (
+        train_count,
+        validation_count,
+        test_count,
+    )
+
+
 def write_manifest(
     *,
     output_path: Path,
@@ -342,6 +439,8 @@ def write_split_metadata(
     train_fraction: float,
     validation_fraction: float,
     test_fraction: float,
+    requested_counts: dict[str, int] | None = None,
+    holdout_dataset: Path | None = None,
 ) -> None:
     """
     Save split metadata as JSON.
@@ -381,6 +480,24 @@ def write_split_metadata(
         },
     }
 
+    if requested_counts is not None:
+        metadata[
+            "split_method"
+        ] = "explicit_counts"
+        metadata[
+            "requested_counts"
+        ] = requested_counts
+
+    if holdout_dataset is not None:
+        metadata[
+            "holdout_dataset"
+        ] = str(
+            holdout_dataset
+        )
+        metadata[
+            "holdout_identity_preserved"
+        ] = True
+
     with output_path.open(
         "w",
         encoding="utf-8",
@@ -400,17 +517,46 @@ def main() -> None:
     parser = build_argument_parser()
     arguments = parser.parse_args()
 
-    validate_split_fractions(
-        train_fraction=(
-            arguments.train_fraction
-        ),
-        validation_fraction=(
-            arguments.validation_fraction
-        ),
-        test_fraction=(
-            arguments.test_fraction
-        ),
+    explicit_counts = (
+        arguments.train_count,
+        arguments.validation_count,
+        arguments.test_count,
     )
+    supplied_count_options = sum(
+        value is not None
+        for value in explicit_counts
+    )
+
+    if supplied_count_options not in {
+        0,
+        3,
+    }:
+        raise ValueError(
+            "--train-count, --validation-count, and --test-count "
+            "must be supplied together."
+        )
+
+    if (
+        arguments.holdout_dataset is not None
+        and supplied_count_options != 3
+    ):
+        raise ValueError(
+            "--holdout-dataset requires explicit --train-count, "
+            "--validation-count, and --test-count values."
+        )
+
+    if supplied_count_options == 0:
+        validate_split_fractions(
+            train_fraction=(
+                arguments.train_fraction
+            ),
+            validation_fraction=(
+                arguments.validation_fraction
+            ),
+            test_fraction=(
+                arguments.test_fraction
+            ),
+        )
 
     repository_root = find_repository_root()
 
@@ -432,18 +578,46 @@ def main() -> None:
         manifest_path
     )
 
-    (
-        train_count,
-        validation_count,
-        test_count,
-    ) = calculate_split_counts(
-        number_of_samples=len(rows),
-        train_fraction=(
-            arguments.train_fraction
-        ),
-        validation_fraction=(
-            arguments.validation_fraction
-        ),
+    if supplied_count_options == 3:
+        (
+            train_count,
+            validation_count,
+            test_count,
+        ) = validate_explicit_split_counts(
+            number_of_samples=len(rows),
+            train_count=int(
+                arguments.train_count
+            ),
+            validation_count=int(
+                arguments.validation_count
+            ),
+            test_count=int(
+                arguments.test_count
+            ),
+        )
+    else:
+        (
+            train_count,
+            validation_count,
+            test_count,
+        ) = calculate_split_counts(
+            number_of_samples=len(rows),
+            train_fraction=(
+                arguments.train_fraction
+            ),
+            validation_fraction=(
+                arguments.validation_fraction
+            ),
+        )
+
+    train_fraction = (
+        train_count / len(rows)
+    )
+    validation_fraction = (
+        validation_count / len(rows)
+    )
+    test_fraction = (
+        test_count / len(rows)
     )
 
     random_generator = (
@@ -452,35 +626,125 @@ def main() -> None:
         )
     )
 
-    shuffled_indices = (
-        random_generator.permutation(
-            len(rows)
+    holdout_dataset = None
+
+    if arguments.holdout_dataset is not None:
+        holdout_dataset = resolve_dataset_directory(
+            repository_root=repository_root,
+            dataset_argument=(
+                arguments.holdout_dataset
+            ),
         )
-    )
+        _, reference_validation_rows = (
+            load_manifest(
+                holdout_dataset
+                / "validation_manifest.csv"
+            )
+        )
+        _, reference_test_rows = load_manifest(
+            holdout_dataset
+            / "test_manifest.csv"
+        )
 
-    shuffled_rows = [
-        rows[int(index)]
-        for index in shuffled_indices
-    ]
+        if (
+            len(reference_validation_rows)
+            != validation_count
+            or len(reference_test_rows)
+            != test_count
+        ):
+            raise ValueError(
+                "Reference holdout counts do not match requested "
+                "validation and test counts."
+            )
 
-    train_end = train_count
+        rows_by_path = {
+            row["relative_path"]: row
+            for row in rows
+        }
+        validation_paths = [
+            row["relative_path"]
+            for row in reference_validation_rows
+        ]
+        test_paths = [
+            row["relative_path"]
+            for row in reference_test_rows
+        ]
+        missing_paths = [
+            path
+            for path in (
+                validation_paths
+                + test_paths
+            )
+            if path not in rows_by_path
+        ]
 
-    validation_end = (
-        train_count
-        + validation_count
-    )
+        if missing_paths:
+            raise ValueError(
+                "Reference holdout contains sample paths absent from "
+                f"the target dataset, including {missing_paths[0]!r}."
+            )
 
-    train_rows = shuffled_rows[
-        :train_end
-    ]
+        holdout_paths = set(
+            validation_paths
+            + test_paths
+        )
+        training_candidates = [
+            row
+            for row in rows
+            if row["relative_path"]
+            not in holdout_paths
+        ]
 
-    validation_rows = shuffled_rows[
-        train_end:validation_end
-    ]
+        if len(training_candidates) != train_count:
+            raise ValueError(
+                "Samples remaining after fixed holdout selection do not "
+                f"match train_count: {len(training_candidates)} != "
+                f"{train_count}."
+            )
 
-    test_rows = shuffled_rows[
-        validation_end:
-    ]
+        training_order = (
+            random_generator.permutation(
+                len(training_candidates)
+            )
+        )
+        train_rows = [
+            training_candidates[
+                int(index)
+            ]
+            for index in training_order
+        ]
+        validation_rows = [
+            rows_by_path[path]
+            for path in validation_paths
+        ]
+        test_rows = [
+            rows_by_path[path]
+            for path in test_paths
+        ]
+    else:
+        shuffled_indices = (
+            random_generator.permutation(
+                len(rows)
+            )
+        )
+        shuffled_rows = [
+            rows[int(index)]
+            for index in shuffled_indices
+        ]
+        train_end = train_count
+        validation_end = (
+            train_count
+            + validation_count
+        )
+        train_rows = shuffled_rows[
+            :train_end
+        ]
+        validation_rows = shuffled_rows[
+            train_end:validation_end
+        ]
+        test_rows = shuffled_rows[
+            validation_end:
+        ]
 
     if len(test_rows) != test_count:
         raise RuntimeError(
@@ -555,14 +819,24 @@ def main() -> None:
         ),
         test_count=test_count,
         train_fraction=(
-            arguments.train_fraction
+            train_fraction
         ),
         validation_fraction=(
-            arguments.validation_fraction
+            validation_fraction
         ),
-        test_fraction=(
-            arguments.test_fraction
+        test_fraction=test_fraction,
+        requested_counts=(
+            {
+                "train": train_count,
+                "validation": (
+                    validation_count
+                ),
+                "test": test_count,
+            }
+            if supplied_count_options == 3
+            else None
         ),
+        holdout_dataset=holdout_dataset,
     )
 
     print()

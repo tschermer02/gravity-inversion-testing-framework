@@ -9,8 +9,17 @@ from cnn_inversion_3d.dataset import (
     DENSITY_SHAPE,
     GRAVITY_SHAPE,
 )
+from cnn_inversion_3d.diagnostics import (
+    build_prediction_diagnostics,
+)
 
 from typing import Literal
+
+VerticalExpansion = Literal[
+    "repeat",
+    "transpose",
+]
+
 
 @dataclass(frozen=True)
 class ModelConfig:
@@ -30,6 +39,7 @@ class ModelConfig:
     learning_rate: float = 1.0e-3
     output_activation: str = "sigmoid"
     body_loss_fraction: float = 0.5
+    vertical_expansion: VerticalExpansion = "repeat"
 
     def validate(self) -> None:
         """Validate model parameters."""
@@ -56,6 +66,15 @@ class ModelConfig:
         if not 0.0 < self.body_loss_fraction < 1.0:
             raise ValueError(
                 "body_loss_fraction must be between zero and one."
+            )
+
+        if self.vertical_expansion not in {
+            "repeat",
+            "transpose",
+        }:
+            raise ValueError(
+                "vertical_expansion must be either "
+                "'repeat' or 'transpose'."
             )
 
 def convolution_block(
@@ -260,12 +279,30 @@ def build_baseline_model(
         name="decoder_2",
     )
 
-    depth_expansion = tf.keras.layers.UpSampling3D(
-        size=(3, 1, 1),
-        name="expand_receiver_depth_to_model_depth",
-    )(
-        decoder_2
-    )
+    if config.vertical_expansion == "repeat":
+        depth_expansion = tf.keras.layers.UpSampling3D(
+            size=(3, 1, 1),
+            name="expand_receiver_depth_to_model_depth",
+        )(
+            decoder_2
+        )
+    elif config.vertical_expansion == "transpose":
+        depth_expansion = tf.keras.layers.Conv3DTranspose(
+            filters=base_filters,
+            kernel_size=(3, 3, 3),
+            strides=(3, 1, 1),
+            padding="same",
+            activation="relu",
+            kernel_initializer="he_normal",
+            name="expand_receiver_depth_to_model_depth",
+        )(
+            decoder_2
+        )
+    else:
+        raise ValueError(
+            "Unsupported vertical expansion method: "
+            f"{config.vertical_expansion!r}."
+        )
 
     refined = convolution_block(
         depth_expansion,
@@ -443,9 +480,9 @@ def compile_baseline_model(
     """
     Compile the baseline model.
 
-    The first experiment uses plain mean squared error with no explicit
-    regularization. Mean absolute error is included only as a reporting
-    metric.
+    Training uses balanced body/background mean squared error with no
+    explicit regularization. Ordinary mean squared error and mean
+    absolute error are included only as reporting metrics.
 
     Parameters
     ----------
@@ -480,6 +517,7 @@ def compile_baseline_model(
             tf.keras.metrics.MeanAbsoluteError(
                 name="density_mae"
             ),
+            *build_prediction_diagnostics(),
         ],
     )
 

@@ -1,0 +1,68 @@
+{
+  "dataset_type": "single_positive_rectangular_body",
+  "gravity_component": "Gz",
+  "gravity_channel": 4,
+  "gravity_unit": "mGal",
+  "density_unit": "g/cm3",
+  "density_array_order": "density[z, y, x]",
+  "gravity_array_order": "gravity[z_receiver, y_receiver, x_receiver]",
+  "density_shape": [
+    24,
+    64,
+    64
+  ],
+  "gravity_shape": [
+    8,
+    64,
+    64
+  ],
+  "number_of_samples": 1000,
+  "random_seed": 20260727,
+  "noise": null,
+  "regularization": null,
+  "configuration": {
+    "number_of_samples": 1000,
+    "random_seed": 20260727,
+    "output_directory": "datasets\\fwd3d_matlab_edge_rectangular_baseline",
+    "overwrite": true,
+    "compressed": true,
+    "receiver_chunk_size": 128,
+    "body": {
+      "minimum_width_x": 4,
+      "maximum_width_x": 16,
+      "minimum_width_y": 4,
+      "maximum_width_y": 16,
+      "minimum_thickness_z": 2,
+      "maximum_thickness_z": 8,
+      "minimum_top_depth_index": 2,
+      "maximum_top_depth_index": 16,
+      "minimum_density_contrast": 0.2,
+      "maximum_density_contrast": 1.0,
+      "horizontal_margin_cells": 2
+    },
+    "receivers": {
+      "number_of_levels": 8,
+      "first_level_z": -10.0,
+      "level_spacing": 10.0
+    }
+  },
+  "grid": {
+    "nx": 64,
+    "ny": 64,
+    "nz": 24,
+    "x_min": 0.0,
+    "x_max": 630.0,
+    "y_min": 0.0,
+    "y_max": 630.0,
+    "z_min": 5.0,
+    "z_max": 235.0,
+    "dx": 10.0,
+    "dy": 10.0,
+    "dz": 10.0
+  },
+  "generation_seconds": 258.97386770002777,
+  "mean_seconds_per_sample": 0.2589738677000278,
+  "total_nonzero_density_cells": 497791,
+  "gravity_global_minimum_mgal": 2.438772811054697e-05,
+  "gravity_global_maximum_mgal": 0.9495671422487975
+}

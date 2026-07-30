@@ -1,0 +1,32 @@
+{
+  "random_seed": 20260727,
+  "total_samples": 2200,
+  "requested_fractions": {
+    "train": 0.9090909090909091,
+    "validation": 0.045454545454545456,
+    "test": 0.045454545454545456
+  },
+  "sample_counts": {
+    "train": 2000,
+    "validation": 100,
+    "test": 100
+  },
+  "actual_fractions": {
+    "train": 0.9090909090909091,
+    "validation": 0.045454545454545456,
+    "test": 0.045454545454545456
+  },
+  "split_manifests": {
+    "train": "train_manifest.csv",
+    "validation": "validation_manifest.csv",
+    "test": "test_manifest.csv"
+  },
+  "split_method": "explicit_counts",
+  "requested_counts": {
+    "train": 2000,
+    "validation": 100,
+    "test": 100
+  },
+  "holdout_dataset": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\datasets\\E03_shallow_depth_baseline",
+  "holdout_identity_preserved": true
+}

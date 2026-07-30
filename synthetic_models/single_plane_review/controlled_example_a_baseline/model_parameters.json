@@ -1,0 +1,25 @@
+{
+  "name": "controlled_example_a_baseline",
+  "top_depth_m": 20.0,
+  "width_x_m": 60.0,
+  "width_y_m": 60.0,
+  "thickness_m": 30.0,
+  "density_contrast_g_cm3": 0.5,
+  "center_x_m": 315.0,
+  "center_y_m": 315.0,
+  "bottom_depth_m": 50.0,
+  "x_bounds_m": [
+    285.0,
+    345.0
+  ],
+  "y_bounds_m": [
+    285.0,
+    345.0
+  ],
+  "z_bounds_m": [
+    20.0,
+    50.0
+  ],
+  "changed_parameter_relative_to_baseline": "none",
+  "changed_value": "baseline"
+}

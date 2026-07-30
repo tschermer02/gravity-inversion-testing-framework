@@ -1,0 +1,111 @@
+{
+  "training_configuration": {
+    "dataset_directory": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\datasets\\E03_shallow_depth_baseline",
+    "output_directory": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\training_outputs\\E03_shallow_depth_baseline",
+    "batch_size": 2,
+    "epochs": 100,
+    "body_loss_fraction": 0.5,
+    "gravity_scale": 0.1837148368358612,
+    "gravity_scale_summary": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\datasets\\E03_shallow_depth_baseline\\training_gravity_distribution.json",
+    "gravity_scale_method": "percentile_99",
+    "density_scale": 1.0,
+    "random_seed": 20260727,
+    "base_filters": 8,
+    "learning_rate": 0.001,
+    "output_activation": "sigmoid",
+    "vertical_expansion": "transpose",
+    "collapse_threshold": 1e-05,
+    "collapse_patience": 2,
+    "stop_on_collapse": false,
+    "overwrite": false
+  },
+  "model_name": "baseline_fwd3d_inversion_cnn",
+  "model_input_shape": [
+    null,
+    8,
+    64,
+    64,
+    1
+  ],
+  "model_output_shape": [
+    null,
+    24,
+    64,
+    64,
+    1
+  ],
+  "trainable_parameters": 90225,
+  "split_counts": {
+    "train": 800,
+    "validation": 100,
+    "test": 100
+  },
+  "elapsed_seconds": 2817.3628618000075,
+  "final_metrics": {
+    "background_mse_component": 0.002562974113970995,
+    "background_prediction_mean": 0.005667593330144882,
+    "body_mse_component": 0.03541366755962372,
+    "body_prediction_mean": 0.6097175478935242,
+    "density_mae": 0.0062722619622945786,
+    "density_mse": 0.002679096069186926,
+    "loss": 0.018988320603966713,
+    "prediction_fraction_above_1e_4": 0.07983459532260895,
+    "prediction_maximum": 0.9457607865333557,
+    "prediction_mean": 0.008478367701172829,
+    "prediction_minimum": 0.0,
+    "prediction_standard_deviation": 0.06563161313533783
+  },
+  "final_epoch_diagnostics": {
+    "background_mse_component": 0.0028242585249245167,
+    "background_prediction_mean": 0.006034291349351406,
+    "body_mse_component": 0.02818656899034977,
+    "body_prediction_mean": 0.6371557116508484,
+    "density_mae": 0.0066947657614946365,
+    "density_mse": 0.0029470857698470354,
+    "loss": 0.015505406074225903,
+    "prediction_fraction_above_1e_4": 0.08865462243556976,
+    "prediction_maximum": 0.9979038834571838,
+    "prediction_mean": 0.009269879199564457,
+    "prediction_minimum": 0.0,
+    "prediction_standard_deviation": 0.07027871161699295,
+    "val_background_mse_component": 0.00291796145029366,
+    "val_background_prediction_mean": 0.0059635452926158905,
+    "val_body_mse_component": 0.03504180163145065,
+    "val_body_prediction_mean": 0.6622073650360107,
+    "val_density_mae": 0.006678191013634205,
+    "val_density_mse": 0.0030671125277876854,
+    "val_loss": 0.018979882821440697,
+    "val_prediction_fraction_above_1e_4": 0.03595082461833954,
+    "val_prediction_maximum": 0.9942813515663147,
+    "val_prediction_mean": 0.009225673042237759,
+    "val_prediction_minimum": 0.0,
+    "val_prediction_standard_deviation": 0.07159705460071564
+  },
+  "collapse_detection": {
+    "monitor": "val_prediction_maximum",
+    "threshold": 1e-05,
+    "patience": 2,
+    "stop_training": false,
+    "detected": false,
+    "collapse_epoch": null,
+    "diagnostics": null
+  },
+  "reproducibility": {
+    "seed": 20260727,
+    "seeded_libraries": [
+      "python.random",
+      "numpy",
+      "tensorflow",
+      "tf.data training shuffle"
+    ],
+    "bitwise_determinism_guaranteed": false,
+    "note": "Seeds provide practical repeatability, but TensorFlow kernels, hardware, threading, and oneDNN may still produce nondeterministic or numerically different results."
+  },
+  "loss": {
+    "name": "balanced_density_mse",
+    "body_fraction": 0.5,
+    "background_fraction": 0.5
+  },
+  "explicit_regularization": null,
+  "observational_noise": null
+}

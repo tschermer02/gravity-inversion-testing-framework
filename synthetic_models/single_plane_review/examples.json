@@ -1,0 +1,342 @@
+{
+  "horizontal_placement": "Centered on the density domain as closely as cell-edge alignment permits.",
+  "examples": [
+    {
+      "name": "example_01_shallow_small",
+      "top_depth_m": 20.0,
+      "width_x_m": 40.0,
+      "width_y_m": 40.0,
+      "thickness_m": 20.0,
+      "density_contrast_g_cm3": 0.4,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 40.0,
+      "x_bounds_m": [
+        295.0,
+        335.0
+      ],
+      "y_bounds_m": [
+        295.0,
+        335.0
+      ],
+      "z_bounds_m": [
+        20.0,
+        40.0
+      ],
+      "review_set": "legacy"
+    },
+    {
+      "name": "example_02_shallow_broad",
+      "top_depth_m": 30.0,
+      "width_x_m": 120.0,
+      "width_y_m": 100.0,
+      "thickness_m": 40.0,
+      "density_contrast_g_cm3": 0.6,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 70.0,
+      "x_bounds_m": [
+        255.0,
+        375.0
+      ],
+      "y_bounds_m": [
+        265.0,
+        365.0
+      ],
+      "z_bounds_m": [
+        30.0,
+        70.0
+      ],
+      "review_set": "legacy"
+    },
+    {
+      "name": "example_03_intermediate",
+      "top_depth_m": 50.0,
+      "width_x_m": 80.0,
+      "width_y_m": 100.0,
+      "thickness_m": 50.0,
+      "density_contrast_g_cm3": 0.7,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 100.0,
+      "x_bounds_m": [
+        275.0,
+        355.0
+      ],
+      "y_bounds_m": [
+        265.0,
+        365.0
+      ],
+      "z_bounds_m": [
+        50.0,
+        100.0
+      ],
+      "review_set": "legacy"
+    },
+    {
+      "name": "example_04_deeper_compact",
+      "top_depth_m": 70.0,
+      "width_x_m": 50.0,
+      "width_y_m": 60.0,
+      "thickness_m": 50.0,
+      "density_contrast_g_cm3": 0.8,
+      "center_x_m": 320.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 120.0,
+      "x_bounds_m": [
+        295.0,
+        345.0
+      ],
+      "y_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "z_bounds_m": [
+        70.0,
+        120.0
+      ],
+      "review_set": "legacy"
+    },
+    {
+      "name": "example_05_deepest_largest",
+      "top_depth_m": 80.0,
+      "width_x_m": 160.0,
+      "width_y_m": 160.0,
+      "thickness_m": 80.0,
+      "density_contrast_g_cm3": 1.0,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 160.0,
+      "x_bounds_m": [
+        235.0,
+        395.0
+      ],
+      "y_bounds_m": [
+        235.0,
+        395.0
+      ],
+      "z_bounds_m": [
+        80.0,
+        160.0
+      ],
+      "review_set": "legacy"
+    },
+    {
+      "name": "controlled_example_a_baseline",
+      "top_depth_m": 20.0,
+      "width_x_m": 60.0,
+      "width_y_m": 60.0,
+      "thickness_m": 30.0,
+      "density_contrast_g_cm3": 0.5,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 50.0,
+      "x_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "y_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "z_bounds_m": [
+        20.0,
+        50.0
+      ],
+      "review_set": "controlled",
+      "changed_parameter_relative_to_baseline": "none",
+      "changed_value": "baseline"
+    },
+    {
+      "name": "controlled_example_b_increased_depth",
+      "top_depth_m": 70.0,
+      "width_x_m": 60.0,
+      "width_y_m": 60.0,
+      "thickness_m": 30.0,
+      "density_contrast_g_cm3": 0.5,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 100.0,
+      "x_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "y_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "z_bounds_m": [
+        70.0,
+        100.0
+      ],
+      "review_set": "controlled",
+      "changed_parameter_relative_to_baseline": "top_depth_m",
+      "changed_value": 70.0
+    },
+    {
+      "name": "controlled_example_c_increased_horizontal_size",
+      "top_depth_m": 20.0,
+      "width_x_m": 140.0,
+      "width_y_m": 140.0,
+      "thickness_m": 30.0,
+      "density_contrast_g_cm3": 0.5,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 50.0,
+      "x_bounds_m": [
+        245.0,
+        385.0
+      ],
+      "y_bounds_m": [
+        245.0,
+        385.0
+      ],
+      "z_bounds_m": [
+        20.0,
+        50.0
+      ],
+      "review_set": "controlled",
+      "changed_parameter_relative_to_baseline": "horizontal_size",
+      "changed_value": {
+        "width_x_m": 140.0,
+        "width_y_m": 140.0
+      }
+    },
+    {
+      "name": "controlled_example_d_increased_density_contrast",
+      "top_depth_m": 20.0,
+      "width_x_m": 60.0,
+      "width_y_m": 60.0,
+      "thickness_m": 30.0,
+      "density_contrast_g_cm3": 1.0,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 50.0,
+      "x_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "y_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "z_bounds_m": [
+        20.0,
+        50.0
+      ],
+      "review_set": "controlled",
+      "changed_parameter_relative_to_baseline": "density_contrast_g_cm3",
+      "changed_value": 1.0
+    },
+    {
+      "name": "controlled_example_e_increased_thickness",
+      "top_depth_m": 20.0,
+      "width_x_m": 60.0,
+      "width_y_m": 60.0,
+      "thickness_m": 80.0,
+      "density_contrast_g_cm3": 0.5,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 100.0,
+      "x_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "y_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "z_bounds_m": [
+        20.0,
+        100.0
+      ],
+      "review_set": "controlled",
+      "changed_parameter_relative_to_baseline": "thickness_m",
+      "changed_value": 80.0
+    },
+    {
+      "name": "controlled_example_f_maximum_combined_case",
+      "top_depth_m": 80.0,
+      "width_x_m": 160.0,
+      "width_y_m": 160.0,
+      "thickness_m": 80.0,
+      "density_contrast_g_cm3": 1.0,
+      "center_x_m": 315.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 160.0,
+      "x_bounds_m": [
+        235.0,
+        395.0
+      ],
+      "y_bounds_m": [
+        235.0,
+        395.0
+      ],
+      "z_bounds_m": [
+        80.0,
+        160.0
+      ],
+      "review_set": "controlled",
+      "changed_parameter_relative_to_baseline": "multiple_parameters",
+      "changed_value": "maximum combined case"
+    },
+    {
+      "name": "controlled_example_g_left_shifted_position",
+      "top_depth_m": 20.0,
+      "width_x_m": 60.0,
+      "width_y_m": 60.0,
+      "thickness_m": 30.0,
+      "density_contrast_g_cm3": 0.5,
+      "center_x_m": 175.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 50.0,
+      "x_bounds_m": [
+        145.0,
+        205.0
+      ],
+      "y_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "z_bounds_m": [
+        20.0,
+        50.0
+      ],
+      "review_set": "controlled",
+      "changed_parameter_relative_to_baseline": "horizontal_position",
+      "changed_value": {
+        "center_x_m": 175.0,
+        "center_y_m": 315.0
+      }
+    },
+    {
+      "name": "controlled_example_h_right_shifted_position",
+      "top_depth_m": 20.0,
+      "width_x_m": 60.0,
+      "width_y_m": 60.0,
+      "thickness_m": 30.0,
+      "density_contrast_g_cm3": 0.5,
+      "center_x_m": 455.0,
+      "center_y_m": 315.0,
+      "bottom_depth_m": 50.0,
+      "x_bounds_m": [
+        425.0,
+        485.0
+      ],
+      "y_bounds_m": [
+        285.0,
+        345.0
+      ],
+      "z_bounds_m": [
+        20.0,
+        50.0
+      ],
+      "review_set": "controlled",
+      "changed_parameter_relative_to_baseline": "horizontal_position",
+      "changed_value": {
+        "center_x_m": 455.0,
+        "center_y_m": 315.0
+      }
+    }
+  ]
+}

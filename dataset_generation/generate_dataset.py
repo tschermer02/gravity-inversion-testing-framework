@@ -47,6 +47,14 @@ MANIFEST_FIELD_NAMES = (
     "center_x_index",
     "center_y_index",
     "center_z_index",
+    "top_depth_m",
+    "bottom_depth_m",
+    "center_depth_m",
+    "width_x_m",
+    "width_y_m",
+    "thickness_z_m",
+    "center_x_m",
+    "center_y_m",
     "density_contrast",
     "nonzero_density_cells",
     "gravity_minimum_mgal",
@@ -108,6 +116,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--maximum-top-depth-index",
+        type=int,
+        default=None,
+        help=(
+            "Optional maximum body top-depth edge index. "
+            "With the MATLAB-compatible 10 m grid, index 8 "
+            "corresponds to 80 m. The configured default is unchanged "
+            "when this option is omitted."
+        ),
+    )
+
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help=(
@@ -153,6 +173,17 @@ def apply_command_line_overrides(
         updated = replace(
             updated,
             output_directory=arguments.output,
+        )
+
+    if arguments.maximum_top_depth_index is not None:
+        updated = replace(
+            updated,
+            body=replace(
+                updated.body,
+                maximum_top_depth_index=(
+                    arguments.maximum_top_depth_index
+                ),
+            ),
         )
 
     if arguments.overwrite:

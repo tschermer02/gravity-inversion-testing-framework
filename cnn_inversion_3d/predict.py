@@ -104,6 +104,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Replace an existing prediction-output directory.",
     )
 
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Resume an interrupted prediction run, reusing complete "
+            "per-sample outputs in the existing directory."
+        ),
+    )
+
     return parser
 
 
@@ -579,6 +588,11 @@ def main() -> None:
             "--gravity-scale must be greater than zero."
         )
 
+    if arguments.overwrite and arguments.resume:
+        raise ValueError(
+            "--overwrite and --resume cannot be used together."
+        )
+
     repository_root = (
         find_repository_root()
     )
@@ -603,10 +617,16 @@ def main() -> None:
             f"Model not found:\n{model_path}"
         )
 
-    prepare_output_directory(
-        output_directory=output_directory,
-        overwrite=arguments.overwrite,
-    )
+    if arguments.resume:
+        output_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+    else:
+        prepare_output_directory(
+            output_directory=output_directory,
+            overwrite=arguments.overwrite,
+        )
 
     manifest_rows = load_manifest(
         dataset_directory=dataset_directory,
@@ -623,6 +643,10 @@ def main() -> None:
     )
 
     results: list[dict[str, Any]] = []
+    results_path = (
+        output_directory
+        / "prediction_metrics.json"
+    )
 
     print()
     print("Predicting 3D density models")
@@ -664,42 +688,8 @@ def main() -> None:
                 f"{true_density.shape}"
             )
 
-        normalized_gravity = (
-            gravity
-            / np.float32(
-                arguments.gravity_scale
-            )
-        )
-
-        gravity_batch = normalized_gravity[
-            np.newaxis,
-            ...,
-        ]
-
-        predicted_batch = model.predict(
-            gravity_batch,
-            verbose=0,
-        )
-
-        predicted_density = np.asarray(
-            predicted_batch[0],
-            dtype=np.float32,
-        )
-
         true_density_3d = (
             true_density[..., 0]
-        )
-
-        predicted_density_3d = (
-            predicted_density[..., 0]
-        )
-
-        metrics = calculate_metrics(
-            true_density=true_density_3d,
-            predicted_density=(
-                predicted_density_3d
-            ),
-            threshold=arguments.threshold,
         )
 
         sample_name = sample_path.stem
@@ -709,20 +699,62 @@ def main() -> None:
             / f"{sample_name}_prediction.npz"
         )
 
-        np.savez_compressed(
-            prediction_path,
-            gravity=np.asarray(
-                gravity[..., 0],
+        if arguments.resume and prediction_path.exists():
+            with np.load(
+                prediction_path,
+                allow_pickle=False,
+            ) as prediction_file:
+                predicted_density_3d = np.asarray(
+                    prediction_file[
+                        "predicted_density"
+                    ],
+                    dtype=np.float32,
+                )
+        else:
+            normalized_gravity = (
+                gravity
+                / np.float32(
+                    arguments.gravity_scale
+                )
+            )
+            gravity_batch = normalized_gravity[
+                np.newaxis,
+                ...,
+            ]
+            predicted_batch = model(
+                gravity_batch,
+                training=False,
+            )
+            predicted_density = np.asarray(
+                predicted_batch[0],
                 dtype=np.float32,
+            )
+            predicted_density_3d = (
+                predicted_density[..., 0]
+            )
+
+            np.savez_compressed(
+                prediction_path,
+                gravity=np.asarray(
+                    gravity[..., 0],
+                    dtype=np.float32,
+                ),
+                true_density=np.asarray(
+                    true_density_3d,
+                    dtype=np.float32,
+                ),
+                predicted_density=np.asarray(
+                    predicted_density_3d,
+                    dtype=np.float32,
+                ),
+            )
+
+        metrics = calculate_metrics(
+            true_density=true_density_3d,
+            predicted_density=(
+                predicted_density_3d
             ),
-            true_density=np.asarray(
-                true_density_3d,
-                dtype=np.float32,
-            ),
-            predicted_density=np.asarray(
-                predicted_density_3d,
-                dtype=np.float32,
-            ),
+            threshold=arguments.threshold,
         )
 
         figure_path = (
@@ -730,15 +762,21 @@ def main() -> None:
             / f"{sample_name}_comparison.png"
         )
 
-        save_prediction_figure(
-            gravity=gravity[..., 0],
-            true_density=true_density_3d,
-            predicted_density=(
-                predicted_density_3d
-            ),
-            output_path=figure_path,
-            sample_name=sample_name,
+        figure_was_cached = (
+            arguments.resume
+            and figure_path.exists()
         )
+
+        if not figure_was_cached:
+            save_prediction_figure(
+                gravity=gravity[..., 0],
+                true_density=true_density_3d,
+                predicted_density=(
+                    predicted_density_3d
+                ),
+                output_path=figure_path,
+                sample_name=sample_name,
+            )
 
         result = {
             "sample_index": row_index,
@@ -754,28 +792,24 @@ def main() -> None:
 
         results.append(result)
 
+        with results_path.open(
+            "w",
+            encoding="utf-8",
+        ) as results_file:
+            json.dump(
+                results,
+                results_file,
+                indent=2,
+            )
+
         print(
-            f"{sample_name}: "
+            f"{sample_name}"
+            f"{' [cached]' if figure_was_cached else ''}: "
             f"MSE={metrics['mse']:.6e}, "
             f"IoU={metrics['iou']:.4f}, "
             f"Dice={metrics['dice']:.4f}, "
             f"predicted max="
             f"{metrics['prediction_maximum']:.4f}"
-        )
-
-    results_path = (
-        output_directory
-        / "prediction_metrics.json"
-    )
-
-    with results_path.open(
-        "w",
-        encoding="utf-8",
-    ) as results_file:
-        json.dump(
-            results,
-            results_file,
-            indent=2,
         )
 
     print()

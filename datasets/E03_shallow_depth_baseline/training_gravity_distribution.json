@@ -1,0 +1,23 @@
+{
+  "number_of_samples": 800,
+  "number_of_values": 26214400,
+  "global_minimum": 2.2933842046768405e-05,
+  "global_maximum": 0.9495671391487122,
+  "global_absolute_maximum": 0.9495671391487122,
+  "global_mean": 0.018536422740714546,
+  "global_standard_deviation": 0.03711779458002858,
+  "absolute_value_median": 0.005846956744790077,
+  "absolute_value_percentile_90": 0.04748766869306564,
+  "absolute_value_percentile_95": 0.07961190491914705,
+  "absolute_value_percentile_99": 0.1837148368358612,
+  "absolute_value_percentile_99_9": 0.38281989097595215,
+  "sample_maximum_median": 0.16619296371936798,
+  "sample_maximum_minimum": 0.010528124868869781,
+  "sample_maximum_maximum": 0.9495671391487122,
+  "sample_standard_deviation_median": 0.020294396346545757,
+  "sample_standard_deviation_minimum": 0.001157604470694775,
+  "sample_standard_deviation_maximum": 0.1277203439612137,
+  "recommended_absolute_max_scale": 0.9495671391487122,
+  "recommended_percentile_99_scale": 0.1837148368358612,
+  "recommended_standard_deviation_scale": 0.03711779458002858
+}

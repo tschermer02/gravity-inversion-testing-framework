@@ -1,0 +1,110 @@
+{
+  "gravity_terminology": "Vertical gravity anomaly Gz",
+  "gravity_unit": "mGal",
+  "peak_gravity_definition": "maximum absolute value of the saved gravity array: max(abs(Gz))",
+  "common_gravity_color_limits": {
+    "vmin": 1.4109434351518108e-05,
+    "vmax": 0.7023463660710418,
+    "unit": "mGal"
+  },
+  "individual_gravity_ranges": {
+    "example_01_shallow_small": {
+      "minimum": 1.4109434351518108e-05,
+      "maximum": 0.07023952357446377,
+      "peak_amplitude": 0.07023952357446377,
+      "unit": "mGal"
+    },
+    "example_02_shallow_broad": {
+      "minimum": 0.0005309362781533904,
+      "maximum": 0.37984487714457016,
+      "peak_amplitude": 0.37984487714457016,
+      "unit": "mGal"
+    },
+    "example_03_intermediate": {
+      "minimum": 0.0007586712894390804,
+      "maximum": 0.2612467287445508,
+      "peak_amplitude": 0.2612467287445508,
+      "unit": "mGal"
+    },
+    "example_04_deeper_compact": {
+      "minimum": 0.00039583754712389096,
+      "maximum": 0.08649198191303667,
+      "peak_amplitude": 0.08649198191303667,
+      "unit": "mGal"
+    },
+    "example_05_deepest_largest": {
+      "minimum": 0.008651967991118188,
+      "maximum": 0.7023463660710418,
+      "peak_amplitude": 0.7023463660710418,
+      "unit": "mGal"
+    },
+    "controlled_example_a_baseline": {
+      "minimum": 6.94606136711262e-05,
+      "maximum": 0.18546468002403937,
+      "peak_amplitude": 0.18546468002403937,
+      "unit": "mGal"
+    },
+    "controlled_example_b_increased_depth": {
+      "minimum": 0.0001640467121355803,
+      "maximum": 0.04550511482978418,
+      "peak_amplitude": 0.04550511482978418,
+      "unit": "mGal"
+    },
+    "controlled_example_c_increased_horizontal_size": {
+      "minimum": 0.00038545062991170853,
+      "maximum": 0.374395546921398,
+      "peak_amplitude": 0.374395546921398,
+      "unit": "mGal"
+    },
+    "controlled_example_d_increased_density_contrast": {
+      "minimum": 0.0001389212273422524,
+      "maximum": 0.37092936004807875,
+      "peak_amplitude": 0.37092936004807875,
+      "unit": "mGal"
+    },
+    "controlled_example_e_increased_thickness": {
+      "minimum": 0.0003120586872185436,
+      "maximum": 0.28561852830857326,
+      "peak_amplitude": 0.28561852830857326,
+      "unit": "mGal"
+    },
+    "controlled_example_f_maximum_combined_case": {
+      "minimum": 0.008651967991118188,
+      "maximum": 0.7023463660710418,
+      "peak_amplitude": 0.7023463660710418,
+      "unit": "mGal"
+    },
+    "controlled_example_g_left_shifted_position": {
+      "minimum": 4.146300479454147e-05,
+      "maximum": 0.18546468002403937,
+      "peak_amplitude": 0.18546468002403937,
+      "unit": "mGal"
+    },
+    "controlled_example_h_right_shifted_position": {
+      "minimum": 4.146300479454148e-05,
+      "maximum": 0.18546468002403937,
+      "peak_amplitude": 0.18546468002403937,
+      "unit": "mGal"
+    }
+  },
+  "common_density_color_limits": {
+    "vmin": 0.0,
+    "vmax": 1.0,
+    "unit": "g/cm3"
+  },
+  "observation_marker_stride": 8,
+  "observation_markers": "Actual configured observation locations subsampled for display; the continuous gravity map contains all observation values.",
+  "gravity_display_crop": {
+    "display_only": true,
+    "x_limits_m": [
+      -85.0,
+      715.0
+    ],
+    "y_limits_m": [
+      -85.0,
+      715.0
+    ],
+    "full_gravity_arrays_and_coordinates_preserved": true
+  },
+  "density_plan_view": "Maximum density contrast at each X-Y location over the full depth dimension."
+}

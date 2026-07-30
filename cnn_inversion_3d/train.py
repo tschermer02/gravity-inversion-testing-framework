@@ -3,23 +3,34 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import random
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 import matplotlib.pyplot as plt
+import numpy as np
 import tensorflow as tf
 
 from cnn_inversion_3d.dataset import (
     build_training_datasets,
     find_repository_root,
 )
+from cnn_inversion_3d.diagnostics import (
+    CollapseDetectionCallback,
+)
 from cnn_inversion_3d.model import (
     ModelConfig,
+    VerticalExpansion,
     build_baseline_model,
     compile_baseline_model,
     count_trainable_parameters,
+)
+
+from cnn_inversion_3d.normalization import (
+    GravityScaleMethod,
+    load_gravity_normalization,
 )
 
 
@@ -28,13 +39,13 @@ class TrainingConfig:
     """
     Configuration for baseline 3D CNN training.
 
-    The initial smoke test intentionally uses:
+    Training intentionally uses:
 
     - no explicit regularization
     - no dropout
     - no physics-based loss
     - no observational noise
-    - plain mean squared error
+    - balanced body/background mean squared error
     """
 
     dataset_directory: Path = Path(
@@ -51,6 +62,10 @@ class TrainingConfig:
     body_loss_fraction: float = 0.5
 
     gravity_scale: float = 1.0
+
+    gravity_scale_summary: Path | None = None
+    gravity_scale_method: GravityScaleMethod = "percentile_99"
+
     density_scale: float = 1.0
 
     random_seed: int = 20260727
@@ -58,6 +73,11 @@ class TrainingConfig:
     base_filters: int = 8
     learning_rate: float = 1.0e-3
     output_activation: str = "sigmoid"
+    vertical_expansion: VerticalExpansion = "repeat"
+
+    collapse_threshold: float = 1.0e-5
+    collapse_patience: int = 2
+    stop_on_collapse: bool = False
 
     overwrite: bool = False
 
@@ -94,6 +114,36 @@ class TrainingConfig:
                 "learning_rate must be greater than zero."
             )
 
+        if self.gravity_scale_method not in {
+            "absolute_maximum",
+            "percentile_99",
+            "standard_deviation",
+        }:
+            raise ValueError(
+                "gravity_scale_method must be one of: "
+                "'absolute_maximum', 'percentile_99', or "
+                "'standard_deviation'."
+            )
+
+        if self.vertical_expansion not in {
+            "repeat",
+            "transpose",
+        }:
+            raise ValueError(
+                "vertical_expansion must be either "
+                "'repeat' or 'transpose'."
+            )
+
+        if self.collapse_threshold < 0.0:
+            raise ValueError(
+                "collapse_threshold must not be negative."
+            )
+
+        if self.collapse_patience < 1:
+            raise ValueError(
+                "collapse_patience must be at least one."
+            )
+
 
 def build_argument_parser() -> argparse.ArgumentParser:
     """Build command-line arguments."""
@@ -111,6 +161,30 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Dataset directory. Relative paths are interpreted "
             "from the repository root."
+        ),
+    )
+
+    parser.add_argument(
+        "--gravity-scale-summary",
+        type=Path,
+        default=None,
+        help=(
+            "Training-only gravity-distribution JSON file. When supplied, "
+            "the selected statistic overrides --gravity-scale."
+        ),
+    )
+
+    parser.add_argument(
+        "--gravity-scale-method",
+        choices=(
+            "absolute_maximum",
+            "percentile_99",
+            "standard_deviation",
+        ),
+        default=None,
+        help=(
+            "Statistic loaded from --gravity-scale-summary. "
+            "Default: percentile_99."
         ),
     )
 
@@ -146,10 +220,63 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--vertical-expansion",
+        choices=(
+            "repeat",
+            "transpose",
+        ),
+        default=None,
+        help=(
+            "Layer used to expand receiver depth from 8 to 24. "
+            "Use 'repeat' for UpSampling3D or 'transpose' for "
+            "Conv3DTranspose."
+        ),
+    )
+
+    parser.add_argument(
         "--learning-rate",
         type=float,
         default=None,
         help="Adam learning rate.",
+    )
+
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=(
+            "Random seed used by Python, NumPy, TensorFlow, and "
+            "training-dataset shuffling."
+        ),
+    )
+
+    parser.add_argument(
+        "--collapse-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Validation prediction maximum below which an epoch is "
+            "considered collapsed."
+        ),
+    )
+
+    parser.add_argument(
+        "--collapse-patience",
+        type=int,
+        default=None,
+        help=(
+            "Consecutive collapsed epochs required before reporting "
+            "collapse."
+        ),
+    )
+
+    parser.add_argument(
+        "--stop-on-collapse",
+        action="store_true",
+        help=(
+            "Stop training after collapse detection. By default, "
+            "collapse is reported without stopping."
+        ),
     )
 
     parser.add_argument(
@@ -194,6 +321,16 @@ def apply_arguments(
             arguments.output
         )
 
+    if arguments.gravity_scale_summary is not None:
+        values["gravity_scale_summary"] = (
+            arguments.gravity_scale_summary
+        )
+
+    if arguments.gravity_scale_method is not None:
+        values["gravity_scale_method"] = (
+            arguments.gravity_scale_method
+        )
+
     if arguments.epochs is not None:
         values["epochs"] = arguments.epochs
 
@@ -207,10 +344,33 @@ def apply_arguments(
             arguments.base_filters
         )
 
+    if arguments.vertical_expansion is not None:
+        values["vertical_expansion"] = (
+            arguments.vertical_expansion
+        )
+
     if arguments.learning_rate is not None:
         values["learning_rate"] = (
             arguments.learning_rate
         )
+
+    if arguments.seed is not None:
+        values["random_seed"] = (
+            arguments.seed
+        )
+
+    if arguments.collapse_threshold is not None:
+        values["collapse_threshold"] = (
+            arguments.collapse_threshold
+        )
+
+    if arguments.collapse_patience is not None:
+        values["collapse_patience"] = (
+            arguments.collapse_patience
+        )
+
+    if arguments.stop_on_collapse:
+        values["stop_on_collapse"] = True
 
     if arguments.gravity_scale is not None:
         values["gravity_scale"] = (
@@ -239,6 +399,52 @@ def resolve_path(
         path = repository_root / path
 
     return path.resolve()
+
+
+def resolve_gravity_scale(
+    *,
+    config: TrainingConfig,
+    repository_root: Path,
+) -> tuple[float, Path | None]:
+    """
+    Resolve the global gravity scale used for all dataset splits.
+
+    An explicit training-distribution summary takes precedence over the
+    numeric ``gravity_scale`` configuration value.
+
+    Parameters
+    ----------
+    config
+        Training configuration.
+    repository_root
+        Repository root used to resolve relative paths.
+
+    Returns
+    -------
+    tuple
+        Resolved positive gravity scale and optional source JSON path.
+    """
+
+    if config.gravity_scale_summary is None:
+        return (
+            config.gravity_scale,
+            None,
+        )
+
+    summary_path = resolve_path(
+        repository_root=repository_root,
+        path=config.gravity_scale_summary,
+    )
+
+    normalization = load_gravity_normalization(
+        summary_path=summary_path,
+        method=config.gravity_scale_method,
+    )
+
+    return (
+        normalization.scale,
+        normalization.source_path,
+    )
 
 
 def prepare_output_directory(
@@ -371,19 +577,62 @@ def save_training_metadata(
     split_counts: dict[str, int],
     elapsed_seconds: float,
     final_metrics: dict[str, float],
+    history: tf.keras.callbacks.History,
+    collapse_detection: dict[str, Any],
 ) -> None:
-    """Save training metadata as JSON."""
+    """
+    Save training metadata as JSON.
+
+    Parameters
+    ----------
+    output_path
+        JSON output path.
+    config
+        Fully resolved training configuration.
+    model
+        Trained Keras model.
+    split_counts
+        Number of samples in each dataset split.
+    elapsed_seconds
+        Total training duration in seconds.
+    final_metrics
+        Test metrics calculated using the best saved model.
+    history
+        Keras history containing epoch-level diagnostics.
+    collapse_detection
+        Serializable collapse callback result.
+    """
+
+    training_configuration = asdict(
+        config
+    )
+
+    training_configuration[
+        "dataset_directory"
+    ] = str(
+        config.dataset_directory
+    )
+
+    training_configuration[
+        "output_directory"
+    ] = str(
+        config.output_directory
+    )
+
+    training_configuration[
+        "gravity_scale_summary"
+    ] = (
+        str(
+            config.gravity_scale_summary
+        )
+        if config.gravity_scale_summary is not None
+        else None
+    )
 
     metadata: dict[str, Any] = {
-        "training_configuration": {
-            **asdict(config),
-            "dataset_directory": str(
-                config.dataset_directory
-            ),
-            "output_directory": str(
-                config.output_directory
-            ),
-        },
+        "training_configuration": (
+            training_configuration
+        ),
         "model_name": model.name,
         "model_input_shape": list(
             model.input_shape
@@ -399,7 +648,37 @@ def save_training_metadata(
         "split_counts": split_counts,
         "elapsed_seconds": elapsed_seconds,
         "final_metrics": final_metrics,
-        "loss": "mean_squared_error",
+        "final_epoch_diagnostics": {
+            name: float(values[-1])
+            for name, values in history.history.items()
+            if values
+        },
+        "collapse_detection": collapse_detection,
+        "reproducibility": {
+            "seed": config.random_seed,
+            "seeded_libraries": [
+                "python.random",
+                "numpy",
+                "tensorflow",
+                "tf.data training shuffle",
+            ],
+            "bitwise_determinism_guaranteed": False,
+            "note": (
+                "Seeds provide practical repeatability, but TensorFlow "
+                "kernels, hardware, threading, and oneDNN may still "
+                "produce nondeterministic or numerically different results."
+            ),
+        },
+        "loss": {
+            "name": "balanced_density_mse",
+            "body_fraction": (
+                config.body_loss_fraction
+            ),
+            "background_fraction": (
+                1.0
+                - config.body_loss_fraction
+            ),
+        },
         "explicit_regularization": None,
         "observational_noise": None,
     }
@@ -442,11 +721,24 @@ def main() -> None:
         path=config.output_directory,
     )
 
+    resolved_gravity_scale, gravity_scale_source = (
+        resolve_gravity_scale(
+            config=config,
+            repository_root=repository_root,
+        )
+    )
+
     prepare_output_directory(
         output_directory=output_directory,
         overwrite=config.overwrite,
     )
 
+    random.seed(
+        config.random_seed
+    )
+    np.random.seed(
+        config.random_seed
+    )
     tf.keras.utils.set_random_seed(
         config.random_seed
     )
@@ -459,7 +751,7 @@ def main() -> None:
     ) = build_training_datasets(
         dataset_directory=dataset_directory,
         batch_size=config.batch_size,
-        gravity_scale=config.gravity_scale,
+        gravity_scale=resolved_gravity_scale,
         density_scale=config.density_scale,
         random_seed=config.random_seed,
     )
@@ -472,6 +764,9 @@ def main() -> None:
         ),
         body_loss_fraction=(
             config.body_loss_fraction
+        ),
+        vertical_expansion=(
+            config.vertical_expansion
         ),
     )
 
@@ -494,6 +789,12 @@ def main() -> None:
         / "final_model.keras"
     )
 
+    collapse_callback = CollapseDetectionCallback(
+        threshold=config.collapse_threshold,
+        patience=config.collapse_patience,
+        stop_training=config.stop_on_collapse,
+    )
+
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(
             filepath=str(best_model_path),
@@ -510,6 +811,7 @@ def main() -> None:
             verbose=1,
         ),
         tf.keras.callbacks.TerminateOnNaN(),
+        collapse_callback,
     ]
 
     print()
@@ -531,9 +833,32 @@ def main() -> None:
         f"Epochs: {config.epochs}"
     )
     print(
+        f"Random seed: {config.random_seed}"
+    )
+    print(
         f"Trainable parameters: "
         f"{count_trainable_parameters(model):,}"
     )
+    print(
+        "Gravity scale: "
+        f"{resolved_gravity_scale:.12e}"
+    )
+
+    print(
+        "Gravity scale method: "
+        f"{config.gravity_scale_method}"
+    )
+    print(
+        "Collapse detection: validation maximum < "
+        f"{config.collapse_threshold:.6e} for "
+        f"{config.collapse_patience} epoch(s)"
+    )
+
+    if gravity_scale_source is not None:
+        print(
+            "Gravity scale source: "
+            f"{gravity_scale_source}"
+        )
     print()
 
     training_start = perf_counter()
@@ -611,17 +936,47 @@ def main() -> None:
         output_directory=output_directory,
         batch_size=config.batch_size,
         epochs=config.epochs,
-        gravity_scale=config.gravity_scale,
-        density_scale=config.density_scale,
-        random_seed=config.random_seed,
-        base_filters=config.base_filters,
-        learning_rate=config.learning_rate,
+        body_loss_fraction=(
+            config.body_loss_fraction
+        ),
+        gravity_scale=(
+            resolved_gravity_scale
+        ),
+        gravity_scale_summary=(
+            gravity_scale_source
+        ),
+        gravity_scale_method=(
+            config.gravity_scale_method
+        ),
+        density_scale=(
+            config.density_scale
+        ),
+        random_seed=(
+            config.random_seed
+        ),
+        base_filters=(
+            config.base_filters
+        ),
+        learning_rate=(
+            config.learning_rate
+        ),
         output_activation=(
             config.output_activation
         ),
-        overwrite=config.overwrite,
-        body_loss_fraction=(
-            config.body_loss_fraction
+        vertical_expansion=(
+            config.vertical_expansion
+        ),
+        collapse_threshold=(
+            config.collapse_threshold
+        ),
+        collapse_patience=(
+            config.collapse_patience
+        ),
+        stop_on_collapse=(
+            config.stop_on_collapse
+        ),
+        overwrite=(
+            config.overwrite
         ),
     )
 
@@ -632,6 +987,10 @@ def main() -> None:
         split_counts=split_counts,
         elapsed_seconds=elapsed_seconds,
         final_metrics=final_metrics,
+        history=history,
+        collapse_detection=(
+            collapse_callback.result()
+        ),
     )
 
     print()

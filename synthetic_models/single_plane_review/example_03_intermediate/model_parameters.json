@@ -1,0 +1,23 @@
+{
+  "name": "example_03_intermediate",
+  "top_depth_m": 50.0,
+  "width_x_m": 80.0,
+  "width_y_m": 100.0,
+  "thickness_m": 50.0,
+  "density_contrast_g_cm3": 0.7,
+  "center_x_m": 315.0,
+  "center_y_m": 315.0,
+  "bottom_depth_m": 100.0,
+  "x_bounds_m": [
+    275.0,
+    355.0
+  ],
+  "y_bounds_m": [
+    265.0,
+    365.0
+  ],
+  "z_bounds_m": [
+    50.0,
+    100.0
+  ]
+}

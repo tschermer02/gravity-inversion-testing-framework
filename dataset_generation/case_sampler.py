@@ -16,7 +16,21 @@ from dataset_generation.matlab_grid import MatlabCompatibleGridSpec
 @dataclass(frozen=True)
 class SampledBody:
     """
-    One sampled rectangular body and its scalar metadata.
+    One sampled rectangular body and its derived geometry metadata.
+
+    Index conventions
+    -----------------
+    ``RectangularBodySpec`` uses normal Python slicing:
+
+    - start indices are inclusive
+    - end indices are exclusive
+
+    For example, ``z_start=5`` and ``z_end=10`` occupy vertical cell
+    indices 5 through 9.
+
+    Center indices describe the geometric center of the occupied cell
+    centers. They may therefore be fractional for bodies containing an
+    even number of cells.
     """
 
     specification: RectangularBodySpec
@@ -32,6 +46,17 @@ class SampledBody:
     center_y_index: float
     center_z_index: float
 
+    top_depth_m: float
+    bottom_depth_m: float
+    center_depth_m: float
+
+    width_x_m: float
+    width_y_m: float
+    thickness_z_m: float
+
+    center_x_m: float
+    center_y_m: float
+
     def to_manifest_row(
         self,
         *,
@@ -45,6 +70,28 @@ class SampledBody:
     ) -> dict[str, int | float | str]:
         """
         Return one CSV-compatible manifest row.
+
+        Parameters
+        ----------
+        sample_index
+            Dataset-wide sample number.
+        relative_path
+            Sample path relative to the dataset directory.
+        gravity_minimum
+            Minimum gravity value in mGal.
+        gravity_maximum
+            Maximum gravity value in mGal.
+        gravity_mean
+            Mean gravity value in mGal.
+        gravity_standard_deviation
+            Gravity standard deviation in mGal.
+        nonzero_density_cells
+            Number of occupied density cells.
+
+        Returns
+        -------
+        dict
+            Manifest values for the sampled body.
         """
 
         body = self.specification
@@ -62,40 +109,28 @@ class SampledBody:
             "width_x": self.width_x,
             "width_y": self.width_y,
             "thickness_z": self.thickness_z,
-            "top_depth_index": (
-                self.top_depth_index
-            ),
-            "bottom_depth_index": (
-                self.bottom_depth_index
-            ),
-            "center_x_index": (
-                self.center_x_index
-            ),
-            "center_y_index": (
-                self.center_y_index
-            ),
-            "center_z_index": (
-                self.center_z_index
-            ),
-            "density_contrast": (
-                body.density_contrast
-            ),
-            "nonzero_density_cells": (
-                nonzero_density_cells
-            ),
-            "gravity_minimum_mgal": (
-                gravity_minimum
-            ),
-            "gravity_maximum_mgal": (
-                gravity_maximum
-            ),
+            "top_depth_index": self.top_depth_index,
+            "bottom_depth_index": self.bottom_depth_index,
+            "center_x_index": self.center_x_index,
+            "center_y_index": self.center_y_index,
+            "center_z_index": self.center_z_index,
+            "top_depth_m": self.top_depth_m,
+            "bottom_depth_m": self.bottom_depth_m,
+            "center_depth_m": self.center_depth_m,
+            "width_x_m": self.width_x_m,
+            "width_y_m": self.width_y_m,
+            "thickness_z_m": self.thickness_z_m,
+            "center_x_m": self.center_x_m,
+            "center_y_m": self.center_y_m,
+            "density_contrast": body.density_contrast,
+            "nonzero_density_cells": nonzero_density_cells,
+            "gravity_minimum_mgal": gravity_minimum,
+            "gravity_maximum_mgal": gravity_maximum,
             "gravity_mean_mgal": gravity_mean,
-            "gravity_std_mgal": (
-                gravity_standard_deviation
-            ),
+            "gravity_std_mgal": gravity_standard_deviation,
         }
 
-
+    
 class RectangularBodySampler:
     """
     Randomly sample one positive rectangular anomalous-density body.
@@ -241,19 +276,49 @@ class RectangularBodySampler:
             width_y=width_y,
             thickness_z=thickness_z,
             top_depth_index=z_start,
-            bottom_depth_index=z_end,
+            bottom_depth_index=z_end - 1,
             center_x_index=(
-                x_start + x_end
+                x_start + x_end - 1
             )
             / 2.0,
             center_y_index=(
-                y_start + y_end
+                y_start + y_end - 1
             )
             / 2.0,
             center_z_index=(
-                z_start + z_end
+                z_start + z_end - 1
             )
             / 2.0,
+            top_depth_m=self.grid.z_edge_from_index(
+                z_start
+            ),
+            bottom_depth_m=self.grid.z_edge_from_index(
+                z_end
+            ),
+            center_depth_m=(
+                self.grid.z_edge_from_index(z_start)
+                + self.grid.z_edge_from_index(z_end)
+            )
+            / 2.0,
+            width_x_m=width_x * self.grid.dx,
+            width_y_m=width_y * self.grid.dy,
+            thickness_z_m=thickness_z * self.grid.dz,
+            center_x_m=(
+                self.grid.x_min
+                + (
+                    x_start + x_end - 1
+                )
+                / 2.0
+                * self.grid.dx
+            ),
+            center_y_m=(
+                self.grid.y_min
+                + (
+                    y_start + y_end - 1
+                )
+                / 2.0
+                * self.grid.dy
+            ),
         )
 
     def _sample_integer_inclusive(
