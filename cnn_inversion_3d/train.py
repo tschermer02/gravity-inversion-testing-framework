@@ -14,6 +14,8 @@ import numpy as np
 import tensorflow as tf
 
 from cnn_inversion_3d.dataset import (
+    GRAVITY_SHAPE,
+    SINGLE_PLANE_GRAVITY_SHAPE,
     build_training_datasets,
     find_repository_root,
 )
@@ -24,6 +26,7 @@ from cnn_inversion_3d.model import (
     ModelConfig,
     VerticalExpansion,
     build_baseline_model,
+    build_single_plane_model,
     compile_baseline_model,
     count_trainable_parameters,
 )
@@ -74,6 +77,9 @@ class TrainingConfig:
     learning_rate: float = 1.0e-3
     output_activation: str = "sigmoid"
     vertical_expansion: VerticalExpansion = "repeat"
+    architecture: Literal["multi_height_3d", "single_plane_2d3d"] = (
+        "multi_height_3d"
+    )
 
     collapse_threshold: float = 1.0e-5
     collapse_patience: int = 2
@@ -133,6 +139,11 @@ class TrainingConfig:
                 "vertical_expansion must be either "
                 "'repeat' or 'transpose'."
             )
+        if self.architecture not in {
+            "multi_height_3d",
+            "single_plane_2d3d",
+        }:
+            raise ValueError("Unsupported architecture.")
 
         if self.collapse_threshold < 0.0:
             raise ValueError(
@@ -217,6 +228,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Number of filters in the first convolution block.",
+    )
+
+    parser.add_argument(
+        "--architecture",
+        choices=("multi_height_3d", "single_plane_2d3d"),
+        default=None,
+        help="Additive model/data path. Default preserves multi-height 3D.",
     )
 
     parser.add_argument(
@@ -348,6 +366,8 @@ def apply_arguments(
         values["vertical_expansion"] = (
             arguments.vertical_expansion
         )
+    if arguments.architecture is not None:
+        values["architecture"] = arguments.architecture
 
     if arguments.learning_rate is not None:
         values["learning_rate"] = (
@@ -654,6 +674,12 @@ def save_training_metadata(
             if values
         },
         "collapse_detection": collapse_detection,
+        "best_epoch": int(
+            np.argmin(history.history["val_loss"]) + 1
+        ),
+        "best_validation_loss": float(
+            np.min(history.history["val_loss"])
+        ),
         "reproducibility": {
             "seed": config.random_seed,
             "seeded_libraries": [
@@ -682,6 +708,18 @@ def save_training_metadata(
         "explicit_regularization": None,
         "observational_noise": None,
     }
+
+    if config.architecture == "single_plane_2d3d":
+        metadata["dimensional_transformations"] = [
+            "81 x 81 x 1 surface Gz",
+            "64 x 64 x 8 full-plane resampled surface features",
+            "32 x 32 x 16 encoder features",
+            "16 x 16 x 32 bottleneck features",
+            "64 x 64 x 8 decoded lateral features",
+            "6 x 64 x 64 x 8 depth seed",
+            "12 x 64 x 64 x 8 depth decoder",
+            "24 x 64 x 64 x 1 density output",
+        ]
 
     with output_path.open(
         "w",
@@ -754,6 +792,11 @@ def main() -> None:
         gravity_scale=resolved_gravity_scale,
         density_scale=config.density_scale,
         random_seed=config.random_seed,
+        gravity_shape=(
+            SINGLE_PLANE_GRAVITY_SHAPE
+            if config.architecture == "single_plane_2d3d"
+            else GRAVITY_SHAPE
+        ),
     )
 
     model_config = ModelConfig(
@@ -770,8 +813,10 @@ def main() -> None:
         ),
     )
 
-    model = build_baseline_model(
-        model_config
+    model = (
+        build_single_plane_model(model_config)
+        if config.architecture == "single_plane_2d3d"
+        else build_baseline_model(model_config)
     )
 
     compile_baseline_model(
@@ -879,6 +924,9 @@ def main() -> None:
     model.save(
         final_model_path
     )
+    (
+        output_directory / "model_architecture.json"
+    ).write_text(model.to_json(indent=2), encoding="utf-8")
 
     best_model = tf.keras.models.load_model(
         str(best_model_path),
@@ -966,6 +1014,7 @@ def main() -> None:
         vertical_expansion=(
             config.vertical_expansion
         ),
+        architecture=config.architecture,
         collapse_threshold=(
             config.collapse_threshold
         ),

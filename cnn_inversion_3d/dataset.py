@@ -18,6 +18,12 @@ GRAVITY_SHAPE = (
     1,
 )
 
+SINGLE_PLANE_GRAVITY_SHAPE = (
+    81,
+    81,
+    1,
+)
+
 DENSITY_SHAPE = (
     24,
     64,
@@ -217,6 +223,8 @@ def read_manifest_paths(
 
 def load_npz_sample(
     sample_path: str | Path,
+    *,
+    gravity_shape: tuple[int, ...] = GRAVITY_SHAPE,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Load one gravity-density pair from disk.
@@ -271,7 +279,7 @@ def load_npz_sample(
         )
 
     expected_gravity_without_channel = (
-        GRAVITY_SHAPE[:-1]
+        gravity_shape[:-1]
     )
 
     expected_density_without_channel = (
@@ -339,6 +347,7 @@ def _sample_generator(
     sample_paths: list[Path],
     gravity_scale: float,
     density_scale: float,
+    gravity_shape: tuple[int, ...],
 ) -> Iterator[
     tuple[np.ndarray, np.ndarray]
 ]:
@@ -348,7 +357,8 @@ def _sample_generator(
 
     for sample_path in sample_paths:
         gravity, density = load_npz_sample(
-            sample_path
+            sample_path,
+            gravity_shape=gravity_shape,
         )
 
         gravity = (
@@ -382,6 +392,7 @@ def build_dataset(
     dataset_directory: str | Path,
     manifest_name: str,
     config: DatasetLoaderConfig,
+    gravity_shape: tuple[int, ...] = GRAVITY_SHAPE,
 ) -> tuple[tf.data.Dataset, int]:
     """
     Build one TensorFlow dataset from a split manifest.
@@ -416,7 +427,7 @@ def build_dataset(
 
     output_signature = (
         tf.TensorSpec(
-            shape=GRAVITY_SHAPE,
+            shape=gravity_shape,
             dtype=tf.float32,
             name="gravity",
         ),
@@ -437,6 +448,7 @@ def build_dataset(
                 density_scale=(
                     config.density_scale
                 ),
+                gravity_shape=gravity_shape,
             ),
             output_signature=output_signature,
         )
@@ -488,6 +500,7 @@ def build_training_datasets(
     gravity_scale: float = 1.0,
     density_scale: float = 1.0,
     random_seed: int = 20260727,
+    gravity_shape: tuple[int, ...] = GRAVITY_SHAPE,
 ) -> tuple[
     tf.data.Dataset,
     tf.data.Dataset,
@@ -517,6 +530,7 @@ def build_training_datasets(
                 gravity_scale=gravity_scale,
                 density_scale=density_scale,
             ),
+            gravity_shape=gravity_shape,
         )
     )
 
@@ -532,6 +546,7 @@ def build_training_datasets(
                 gravity_scale=gravity_scale,
                 density_scale=density_scale,
             ),
+            gravity_shape=gravity_shape,
         )
     )
 
@@ -547,6 +562,7 @@ def build_training_datasets(
                 gravity_scale=gravity_scale,
                 density_scale=density_scale,
             ),
+            gravity_shape=gravity_shape,
         )
     )
 

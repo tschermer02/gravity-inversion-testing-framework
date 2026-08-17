@@ -647,6 +647,9 @@ def main() -> None:
         output_directory
         / "prediction_metrics.json"
     )
+    expected_gravity_shape = tuple(
+        int(value) for value in model.input_shape[1:]
+    )
 
     print()
     print("Predicting 3D density models")
@@ -672,11 +675,12 @@ def main() -> None:
 
         gravity, true_density = (
             load_npz_sample(
-                sample_path
+                sample_path,
+                gravity_shape=expected_gravity_shape,
             )
         )
 
-        if gravity.shape != GRAVITY_SHAPE:
+        if gravity.shape != expected_gravity_shape:
             raise RuntimeError(
                 f"Unexpected gravity shape: "
                 f"{gravity.shape}"

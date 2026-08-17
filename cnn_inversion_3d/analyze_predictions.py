@@ -555,15 +555,26 @@ def combine_rows(
             * thickness_z
         )
 
-        center_x_m = get_float(
-            manifest_row,
-            "center_x_m",
-        )
-
-        center_y_m = get_float(
-            manifest_row,
-            "center_y_m",
-        )
+        if (
+            manifest_row.get("center_x_m", "").strip()
+            and manifest_row.get("center_y_m", "").strip()
+        ):
+            center_x_m = get_float(manifest_row, "center_x_m")
+            center_y_m = get_float(manifest_row, "center_y_m")
+        else:
+            # E05 single-plane manifests store exact occupied-cell slices.
+            # Cell centers are 0, 10, ..., 630 m, so the physical center of
+            # [start:end) is the midpoint of start and end - 1.
+            center_x_m = 5.0 * (
+                get_float(manifest_row, "x_start")
+                + get_float(manifest_row, "x_end")
+                - 1.0
+            )
+            center_y_m = 5.0 * (
+                get_float(manifest_row, "y_start")
+                + get_float(manifest_row, "y_end")
+                - 1.0
+            )
 
         survey_center_x_m = 315.0
         survey_center_y_m = 315.0
@@ -609,9 +620,14 @@ def combine_rows(
                     manifest_row,
                     "bottom_depth_m",
                 ),
-                "center_depth_m": get_float(
-                    manifest_row,
-                    "center_depth_m",
+                "center_depth_m": (
+                    get_float(manifest_row, "center_depth_m")
+                    if manifest_row.get("center_depth_m", "").strip()
+                    else 0.5
+                    * (
+                        get_float(manifest_row, "top_depth_m")
+                        + get_float(manifest_row, "bottom_depth_m")
+                    )
                 ),
                 "thickness_z_m": get_float(
                     manifest_row,

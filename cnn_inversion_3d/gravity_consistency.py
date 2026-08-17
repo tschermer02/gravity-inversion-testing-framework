@@ -67,6 +67,30 @@ class CNNForwardModelContext:
 
 
 @dataclass(frozen=True)
+class SinglePlaneForwardOperator:
+    """Expose one FWD3D receiver level as a two-dimensional operator."""
+
+    forward_model: FWD3DGravityForwardModel
+
+    @property
+    def input_shape(self) -> tuple[int, int, int]:
+        """Return the density input shape."""
+
+        return self.forward_model.input_shape
+
+    @property
+    def output_shape(self) -> tuple[int, int, int]:
+        """Return one receiver level followed by the surface grid."""
+
+        return self.forward_model.output_shape
+
+    def calculate(self, model: npt.ArrayLike) -> FloatArray:
+        """Calculate and remove only the singleton receiver-level axis."""
+
+        return np.asarray(self.forward_model.calculate(model))
+
+
+@dataclass(frozen=True)
 class GravityConsistencyBatchResult:
     """Summary of a prediction-directory consistency evaluation."""
 
@@ -113,6 +137,13 @@ def remove_final_singleton_channel(
             ...,
             0,
         ]
+
+    if (
+        len(expected_shape) == 3
+        and expected_shape[0] == 1
+        and values.shape == expected_shape[1:]
+    ):
+        values = values[np.newaxis, ...]
 
     if values.shape != expected_shape:
         raise ValueError(
@@ -210,9 +241,12 @@ def compute_gravity_consistency_metrics(
         dtype=np.float64,
     )
 
-    if true_values.ndim != 3:
+    if true_values.ndim == 2:
+        true_values = true_values[np.newaxis, ...]
+        recovered_values = recovered_values[np.newaxis, ...]
+    elif true_values.ndim != 3:
         raise ValueError(
-            "true_gravity must be three-dimensional, received "
+            "true_gravity must be two- or three-dimensional, received "
             f"{true_values.shape}."
         )
 
@@ -479,9 +513,11 @@ def build_cnn_forward_model_context(
             "Unsupported or missing density array order in metadata."
         )
 
-    if metadata.get(
-        "gravity_array_order"
-    ) != "gravity[z_receiver, y_receiver, x_receiver]":
+    gravity_array_order = metadata.get("gravity_array_order")
+    if gravity_array_order not in {
+        "gravity[z_receiver, y_receiver, x_receiver]",
+        "gravity[y, x]",
+    }:
         raise ValueError(
             "Unsupported or missing gravity array order in metadata."
         )
@@ -523,9 +559,14 @@ def build_cnn_forward_model_context(
             "Dataset metadata lacks grid or generation configuration."
         )
 
-    receiver_values = configuration.get(
-        "receivers"
-    )
+    receiver_values = configuration.get("receivers")
+
+    if gravity_array_order == "gravity[y, x]":
+        receiver_values = {
+            "number_of_levels": 1,
+            "first_level_z": metadata["observation_z_m"],
+            "level_spacing": 1.0,
+        }
 
     if not isinstance(
         receiver_values,
@@ -608,18 +649,20 @@ def build_cnn_forward_model_context(
             dtype=np.float64,
         )
     )
-    x_coordinates = np.linspace(
-        grid.x_min,
-        grid.x_max,
-        grid.nx,
-        dtype=np.float64,
-    )
-    y_coordinates = np.linspace(
-        grid.y_min,
-        grid.y_max,
-        grid.ny,
-        dtype=np.float64,
-    )
+    if gravity_array_order == "gravity[y, x]":
+        x_coordinates = np.asarray(
+            metadata["observation_x_coordinates_m"], dtype=np.float64
+        )
+        y_coordinates = np.asarray(
+            metadata["observation_y_coordinates_m"], dtype=np.float64
+        )
+    else:
+        x_coordinates = np.linspace(
+            grid.x_min, grid.x_max, grid.nx, dtype=np.float64
+        )
+        y_coordinates = np.linspace(
+            grid.y_min, grid.y_max, grid.ny, dtype=np.float64
+        )
     receiver_grid = ReceiverGrid(
         x=x_coordinates,
         y=y_coordinates,
@@ -659,14 +702,19 @@ def build_cnn_forward_model_context(
             f"{forward_model.input_shape} != {expected_density_shape}."
         )
 
-    if forward_model.output_shape != expected_gravity_shape:
+    exposed_forward_model: GravityForwardOperator = forward_model
+    if gravity_array_order == "gravity[y, x]":
+        exposed_forward_model = SinglePlaneForwardOperator(forward_model)
+        expected_gravity_shape = (1, *expected_gravity_shape)
+
+    if exposed_forward_model.output_shape != expected_gravity_shape:
         raise ValueError(
             "Reconstructed gravity shape does not match metadata: "
-            f"{forward_model.output_shape} != {expected_gravity_shape}."
+            f"{exposed_forward_model.output_shape} != {expected_gravity_shape}."
         )
 
     return CNNForwardModelContext(
-        forward_model=forward_model,
+        forward_model=exposed_forward_model,
         receiver_levels=receiver_levels,
         x_coordinates=x_coordinates,
         y_coordinates=y_coordinates,

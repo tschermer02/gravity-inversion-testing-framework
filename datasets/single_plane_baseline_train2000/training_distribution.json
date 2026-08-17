@@ -1,0 +1,13 @@
+{
+  "source_split": "training only",
+  "number_of_samples": 2000,
+  "absolute_maximum": 1.1177579164505005,
+  "absolute_percentile_99": 0.22938017547130585,
+  "standard_deviation": 0.04689415544271469,
+  "recommended_absolute_max_scale": 1.1177579164505005,
+  "recommended_percentile_99_scale": 0.22938017547130585,
+  "recommended_standard_deviation_scale": 0.04689415544271469,
+  "normalization_method": "percentile_99",
+  "gravity_scale": 0.22938017547130585,
+  "per_sample_normalization": false
+}

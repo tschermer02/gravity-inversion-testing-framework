@@ -8,6 +8,7 @@ import tensorflow as tf
 from cnn_inversion_3d.dataset import (
     DENSITY_SHAPE,
     GRAVITY_SHAPE,
+    SINGLE_PLANE_GRAVITY_SHAPE,
 )
 from cnn_inversion_3d.diagnostics import (
     build_prediction_diagnostics,
@@ -338,6 +339,130 @@ def build_baseline_model(
             f"received {model.output_shape}."
         )
 
+    return model
+
+
+def _convolution_2d_block(
+    inputs: tf.Tensor,
+    *,
+    filters: int,
+    name: str,
+) -> tf.Tensor:
+    """Apply two same-padded 2D convolutions for surface encoding."""
+
+    x = inputs
+    for index in (1, 2):
+        x = tf.keras.layers.Conv2D(
+            filters,
+            kernel_size=3,
+            padding="same",
+            activation="relu",
+            kernel_initializer="he_normal",
+            name=f"{name}_conv_{index}",
+        )(x)
+    return x
+
+
+def build_single_plane_model(
+    config: ModelConfig | None = None,
+) -> tf.keras.Model:
+    """
+    Build the additive 2D-surface-encoder to 3D-density-decoder CNN.
+
+    The complete configured 81 x 81 surface is linearly resampled to a
+    64 x 64 lateral feature grid, encoded to 16 x 16, decoded to 64 x 64,
+    expanded to six learned-depth feature planes, and transposed-convolved
+    in depth from 6 to 12 to 24 cells.
+    """
+
+    if config is None:
+        config = ModelConfig(vertical_expansion="transpose")
+    config.validate()
+    filters = config.base_filters
+    inputs = tf.keras.Input(
+        shape=SINGLE_PLANE_GRAVITY_SHAPE,
+        name="surface_gravity_gz",
+    )
+    lateral_grid = tf.keras.layers.Resizing(
+        64,
+        64,
+        interpolation="bilinear",
+        name="resample_complete_observation_plane_to_lateral_grid",
+    )(inputs)
+    encoder_1 = _convolution_2d_block(
+        lateral_grid, filters=filters, name="surface_encoder_1"
+    )
+    pooled_1 = tf.keras.layers.MaxPool2D(2, name="surface_pool_1")(
+        encoder_1
+    )
+    encoder_2 = _convolution_2d_block(
+        pooled_1, filters=filters * 2, name="surface_encoder_2"
+    )
+    pooled_2 = tf.keras.layers.MaxPool2D(2, name="surface_pool_2")(
+        encoder_2
+    )
+    bottleneck = _convolution_2d_block(
+        pooled_2, filters=filters * 4, name="surface_bottleneck"
+    )
+    up_1 = tf.keras.layers.UpSampling2D(2, name="surface_upsample_1")(
+        bottleneck
+    )
+    up_1 = tf.keras.layers.Conv2D(
+        filters * 2, 2, padding="same", activation="relu"
+    )(up_1)
+    decoded_1 = _convolution_2d_block(
+        tf.keras.layers.Concatenate()([up_1, encoder_2]),
+        filters=filters * 2,
+        name="surface_decoder_1",
+    )
+    up_2 = tf.keras.layers.UpSampling2D(2, name="surface_upsample_2")(
+        decoded_1
+    )
+    up_2 = tf.keras.layers.Conv2D(
+        filters, 2, padding="same", activation="relu"
+    )(up_2)
+    decoded_2 = _convolution_2d_block(
+        tf.keras.layers.Concatenate()([up_2, encoder_1]),
+        filters=filters,
+        name="surface_decoder_2",
+    )
+    depth_seed = tf.keras.layers.Reshape(
+        (1, 64, 64, filters), name="surface_to_depth_seed"
+    )(decoded_2)
+    depth_seed = tf.keras.layers.UpSampling3D(
+        size=(6, 1, 1), name="seed_six_depth_planes"
+    )(depth_seed)
+    depth_12 = tf.keras.layers.Conv3DTranspose(
+        filters=filters,
+        kernel_size=3,
+        strides=(2, 1, 1),
+        padding="same",
+        activation="relu",
+        kernel_initializer="he_normal",
+        name="decode_depth_6_to_12",
+    )(depth_seed)
+    depth_24 = tf.keras.layers.Conv3DTranspose(
+        filters=filters,
+        kernel_size=3,
+        strides=(2, 1, 1),
+        padding="same",
+        activation="relu",
+        kernel_initializer="he_normal",
+        name="decode_depth_12_to_24",
+    )(depth_12)
+    refined = convolution_block(
+        depth_24, filters=filters, name="single_plane_density_refinement"
+    )
+    outputs = tf.keras.layers.Conv3D(
+        1,
+        1,
+        padding="same",
+        activation=config.output_activation,
+        name="recovered_density",
+    )(refined)
+    model = tf.keras.Model(inputs, outputs, name="single_plane_inversion_cnn")
+    if model.output_shape != (None, *DENSITY_SHAPE):
+        raise RuntimeError(f"Unexpected single-plane output: {model.output_shape}")
     return model
 
 
