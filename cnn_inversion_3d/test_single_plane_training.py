@@ -21,6 +21,7 @@ from cnn_inversion_3d.model import (
     ModelConfig,
     build_baseline_model,
     build_single_plane_model,
+    build_single_plane_learned_depth_seed_model,
     compile_baseline_model,
 )
 
@@ -115,3 +116,63 @@ def test_legacy_model_shape_is_unchanged() -> None:
     model = build_baseline_model(ModelConfig(base_filters=1))
     assert model.input_shape == (None, *GRAVITY_SHAPE)
     assert model.output_shape == (None, *DENSITY_SHAPE)
+
+
+def test_e05_repeated_depth_seed_is_unchanged() -> None:
+    """Verify the original E05 lifting operation remains intact."""
+
+    model = build_single_plane_model(ModelConfig(base_filters=1))
+    layer = model.get_layer("seed_six_depth_planes")
+    assert isinstance(layer, tf.keras.layers.UpSampling3D)
+    assert tuple(layer.output.shape) == (None, 6, 64, 64, 1)
+
+
+def test_e06_learned_depth_seed_shape_and_layers() -> None:
+    """Verify E06 learns channels and explicitly permutes depth first."""
+
+    model = build_single_plane_learned_depth_seed_model(
+        ModelConfig(base_filters=2)
+    )
+    assert model.input_shape == (None, *SINGLE_PLANE_GRAVITY_SHAPE)
+    assert model.output_shape == (None, *DENSITY_SHAPE)
+    assert tuple(
+        model.get_layer("reshape_learned_depth_seed").output.shape
+    ) == (None, 6, 64, 64, 2)
+    assert isinstance(
+        model.get_layer("learn_depth_specific_features"),
+        tf.keras.layers.Conv2D,
+    )
+    assert not any(
+        isinstance(layer, tf.keras.layers.UpSampling3D)
+        and layer.name == "seed_six_depth_planes"
+        for layer in model.layers
+    )
+
+
+def test_e06_forward_and_tiny_training_step() -> None:
+    """Verify the learned-seed model supports inference and training."""
+
+    config = ModelConfig(base_filters=1)
+    model = build_single_plane_learned_depth_seed_model(config)
+    compile_baseline_model(model, config)
+    gravity = np.zeros((1, *SINGLE_PLANE_GRAVITY_SHAPE), np.float32)
+    density = np.zeros((1, *DENSITY_SHAPE), np.float32)
+    density[:, 2:4, 30:34, 30:34, :] = 0.5
+    prediction = model(gravity, training=False)
+    loss = model.train_on_batch(gravity, density)
+    assert tuple(prediction.shape) == (1, *DENSITY_SHAPE)
+    assert np.all(np.isfinite(np.asarray(loss)))
+
+
+def test_e06_serialization_loading(tmp_path: Path) -> None:
+    """Verify E06 model configuration survives Keras serialization."""
+
+    model = build_single_plane_learned_depth_seed_model(
+        ModelConfig(base_filters=1)
+    )
+    path = tmp_path / "e06.keras"
+    model.save(path)
+    loaded = tf.keras.models.load_model(path, compile=False)
+    assert loaded.input_shape == (None, *SINGLE_PLANE_GRAVITY_SHAPE)
+    assert loaded.output_shape == (None, *DENSITY_SHAPE)
+    assert loaded.get_layer("reshape_learned_depth_seed") is not None

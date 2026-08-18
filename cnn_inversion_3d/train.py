@@ -27,6 +27,7 @@ from cnn_inversion_3d.model import (
     VerticalExpansion,
     build_baseline_model,
     build_single_plane_model,
+    build_single_plane_learned_depth_seed_model,
     compile_baseline_model,
     count_trainable_parameters,
 )
@@ -77,7 +78,11 @@ class TrainingConfig:
     learning_rate: float = 1.0e-3
     output_activation: str = "sigmoid"
     vertical_expansion: VerticalExpansion = "repeat"
-    architecture: Literal["multi_height_3d", "single_plane_2d3d"] = (
+    architecture: Literal[
+        "multi_height_3d",
+        "single_plane_2d3d",
+        "single_plane_2d3d_learned_depth_seed",
+    ] = (
         "multi_height_3d"
     )
 
@@ -142,6 +147,7 @@ class TrainingConfig:
         if self.architecture not in {
             "multi_height_3d",
             "single_plane_2d3d",
+            "single_plane_2d3d_learned_depth_seed",
         }:
             raise ValueError("Unsupported architecture.")
 
@@ -232,7 +238,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--architecture",
-        choices=("multi_height_3d", "single_plane_2d3d"),
+        choices=(
+            "multi_height_3d",
+            "single_plane_2d3d",
+            "single_plane_2d3d_learned_depth_seed",
+        ),
         default=None,
         help="Additive model/data path. Default preserves multi-height 3D.",
     )
@@ -709,17 +719,31 @@ def save_training_metadata(
         "observational_noise": None,
     }
 
-    if config.architecture == "single_plane_2d3d":
-        metadata["dimensional_transformations"] = [
+    if config.architecture.startswith("single_plane_2d3d"):
+        transformations = [
             "81 x 81 x 1 surface Gz",
             "64 x 64 x 8 full-plane resampled surface features",
             "32 x 32 x 16 encoder features",
             "16 x 16 x 32 bottleneck features",
             "64 x 64 x 8 decoded lateral features",
-            "6 x 64 x 64 x 8 depth seed",
-            "12 x 64 x 64 x 8 depth decoder",
-            "24 x 64 x 64 x 1 density output",
         ]
+        if config.architecture == "single_plane_2d3d_learned_depth_seed":
+            transformations.extend(
+                [
+                    "64 x 64 x 48 learned depth-channel features",
+                    "6 x 64 x 64 x 8 learned depth seed",
+                ]
+            )
+        else:
+            transformations.append(
+                "6 x 64 x 64 x 8 repeated identical depth seed"
+            )
+        transformations.extend([
+            "12 x 64 x 64 x 8 depth decoder",
+            "24 x 64 x 64 x 8 depth decoder",
+            "24 x 64 x 64 x 1 density output",
+        ])
+        metadata["dimensional_transformations"] = transformations
 
     with output_path.open(
         "w",
@@ -794,7 +818,7 @@ def main() -> None:
         random_seed=config.random_seed,
         gravity_shape=(
             SINGLE_PLANE_GRAVITY_SHAPE
-            if config.architecture == "single_plane_2d3d"
+            if config.architecture.startswith("single_plane_2d3d")
             else GRAVITY_SHAPE
         ),
     )
@@ -813,11 +837,12 @@ def main() -> None:
         ),
     )
 
-    model = (
-        build_single_plane_model(model_config)
-        if config.architecture == "single_plane_2d3d"
-        else build_baseline_model(model_config)
-    )
+    if config.architecture == "single_plane_2d3d_learned_depth_seed":
+        model = build_single_plane_learned_depth_seed_model(model_config)
+    elif config.architecture == "single_plane_2d3d":
+        model = build_single_plane_model(model_config)
+    else:
+        model = build_baseline_model(model_config)
 
     compile_baseline_model(
         model,

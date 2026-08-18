@@ -371,9 +371,33 @@ def build_single_plane_model(
 
     The complete configured 81 x 81 surface is linearly resampled to a
     64 x 64 lateral feature grid, encoded to 16 x 16, decoded to 64 x 64,
-    expanded to six learned-depth feature planes, and transposed-convolved
+    repeated into six identical feature planes, and transposed-convolved
     in depth from 6 to 12 to 24 cells.
     """
+
+    return _build_single_plane_model(
+        config=config,
+        learned_depth_seed=False,
+    )
+
+
+def build_single_plane_learned_depth_seed_model(
+    config: ModelConfig | None = None,
+) -> tf.keras.Model:
+    """Build E06 with a learned, depth-specific six-plane seed."""
+
+    return _build_single_plane_model(
+        config=config,
+        learned_depth_seed=True,
+    )
+
+
+def _build_single_plane_model(
+    *,
+    config: ModelConfig | None,
+    learned_depth_seed: bool,
+) -> tf.keras.Model:
+    """Build the shared E05/E06 network with one selectable lift."""
 
     if config is None:
         config = ModelConfig(vertical_expansion="transpose")
@@ -426,12 +450,30 @@ def build_single_plane_model(
         filters=filters,
         name="surface_decoder_2",
     )
-    depth_seed = tf.keras.layers.Reshape(
-        (1, 64, 64, filters), name="surface_to_depth_seed"
-    )(decoded_2)
-    depth_seed = tf.keras.layers.UpSampling3D(
-        size=(6, 1, 1), name="seed_six_depth_planes"
-    )(depth_seed)
+    if learned_depth_seed:
+        depth_channels = tf.keras.layers.Conv2D(
+            filters=6 * filters,
+            kernel_size=1,
+            padding="same",
+            activation="relu",
+            kernel_initializer="he_normal",
+            name="learn_depth_specific_features",
+        )(decoded_2)
+        depth_channels = tf.keras.layers.Reshape(
+            (64, 64, 6, filters),
+            name="reshape_depth_channels_last",
+        )(depth_channels)
+        depth_seed = tf.keras.layers.Permute(
+            (3, 1, 2, 4),
+            name="reshape_learned_depth_seed",
+        )(depth_channels)
+    else:
+        depth_seed = tf.keras.layers.Reshape(
+            (1, 64, 64, filters), name="surface_to_depth_seed"
+        )(decoded_2)
+        depth_seed = tf.keras.layers.UpSampling3D(
+            size=(6, 1, 1), name="seed_six_depth_planes"
+        )(depth_seed)
     depth_12 = tf.keras.layers.Conv3DTranspose(
         filters=filters,
         kernel_size=3,
@@ -460,7 +502,15 @@ def build_single_plane_model(
         activation=config.output_activation,
         name="recovered_density",
     )(refined)
-    model = tf.keras.Model(inputs, outputs, name="single_plane_inversion_cnn")
+    model = tf.keras.Model(
+        inputs,
+        outputs,
+        name=(
+            "single_plane_learned_depth_seed_inversion_cnn"
+            if learned_depth_seed
+            else "single_plane_inversion_cnn"
+        ),
+    )
     if model.output_shape != (None, *DENSITY_SHAPE):
         raise RuntimeError(f"Unexpected single-plane output: {model.output_shape}")
     return model
