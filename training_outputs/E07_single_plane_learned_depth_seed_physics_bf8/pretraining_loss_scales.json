@@ -1,0 +1,9 @@
+{
+  "density_loss": 0.16468557715415955,
+  "gravity_loss": 3907.599365234375,
+  "weighted_gravity_loss": 0.3907599151134491,
+  "total_loss": 0.5554454922676086,
+  "gravity_loss_weight": 0.0001,
+  "weighted_gravity_to_density_ratio": 2.37276343117567,
+  "maximum_permitted_ratio": 10.0
+}

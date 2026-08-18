@@ -22,6 +22,11 @@ from cnn_inversion_3d.dataset import (
 from cnn_inversion_3d.diagnostics import (
     CollapseDetectionCallback,
 )
+from cnn_inversion_3d.differentiable_gravity import (
+    DifferentiableSinglePlaneGz,
+    PhysicsConsistencyTrainingModel,
+    SaveBestInversionModel,
+)
 from cnn_inversion_3d.model import (
     ModelConfig,
     VerticalExpansion,
@@ -85,6 +90,7 @@ class TrainingConfig:
     ] = (
         "multi_height_3d"
     )
+    gravity_loss_weight: float = 0.0
 
     collapse_threshold: float = 1.0e-5
     collapse_patience: int = 2
@@ -150,6 +156,17 @@ class TrainingConfig:
             "single_plane_2d3d_learned_depth_seed",
         }:
             raise ValueError("Unsupported architecture.")
+        if self.gravity_loss_weight < 0.0:
+            raise ValueError("gravity_loss_weight must not be negative.")
+        if (
+            self.gravity_loss_weight > 0.0
+            and self.architecture
+            != "single_plane_2d3d_learned_depth_seed"
+        ):
+            raise ValueError(
+                "Gravity consistency training requires the E06 "
+                "single_plane_2d3d_learned_depth_seed architecture."
+            )
 
         if self.collapse_threshold < 0.0:
             raise ValueError(
@@ -245,6 +262,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
         default=None,
         help="Additive model/data path. Default preserves multi-height 3D.",
+    )
+
+    parser.add_argument(
+        "--gravity-loss-weight",
+        type=float,
+        default=None,
+        help=(
+            "Differentiable relative-L2 gravity loss weight. Default 0 "
+            "preserves all existing training objectives; E07 uses 0.1."
+        ),
     )
 
     parser.add_argument(
@@ -378,6 +405,8 @@ def apply_arguments(
         )
     if arguments.architecture is not None:
         values["architecture"] = arguments.architecture
+    if arguments.gravity_loss_weight is not None:
+        values["gravity_loss_weight"] = arguments.gravity_loss_weight
 
     if arguments.learning_rate is not None:
         values["learning_rate"] = (
@@ -609,6 +638,7 @@ def save_training_metadata(
     final_metrics: dict[str, float],
     history: tf.keras.callbacks.History,
     collapse_detection: dict[str, Any],
+    pretraining_loss_scales: dict[str, float] | None = None,
 ) -> None:
     """
     Save training metadata as JSON.
@@ -684,6 +714,7 @@ def save_training_metadata(
             if values
         },
         "collapse_detection": collapse_detection,
+        "pretraining_loss_scales": pretraining_loss_scales,
         "best_epoch": int(
             np.argmin(history.history["val_loss"]) + 1
         ),
@@ -706,9 +737,20 @@ def save_training_metadata(
             ),
         },
         "loss": {
-            "name": "balanced_density_mse",
+            "name": (
+                "balanced_density_mse_plus_gravity_consistency"
+                if config.gravity_loss_weight > 0.0
+                else "balanced_density_mse"
+            ),
             "body_fraction": (
                 config.body_loss_fraction
+            ),
+            "gravity_loss_weight": config.gravity_loss_weight,
+            "gravity_loss_definition": (
+                "mean(||F(rho_pred)-G_true||_2^2 / "
+                "(||G_true||_2^2 + epsilon))"
+                if config.gravity_loss_weight > 0.0
+                else None
             ),
             "background_fraction": (
                 1.0
@@ -843,11 +885,61 @@ def main() -> None:
         model = build_single_plane_model(model_config)
     else:
         model = build_baseline_model(model_config)
-
-    compile_baseline_model(
-        model,
-        model_config,
-    )
+    inversion_model = model
+    physics_training = config.gravity_loss_weight > 0.0
+    pretraining_loss_scales: dict[str, float] | None = None
+    if physics_training:
+        model = PhysicsConsistencyTrainingModel(
+            inversion_model,
+            DifferentiableSinglePlaneGz(),
+            gravity_scale=resolved_gravity_scale,
+            gravity_loss_weight=config.gravity_loss_weight,
+            body_loss_fraction=config.body_loss_fraction,
+        )
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(
+                learning_rate=config.learning_rate
+            )
+        )
+        sample_gravity, sample_density = next(iter(training_dataset))
+        initial_terms = model.compute_loss_terms(
+            sample_gravity, sample_density, training=False
+        )
+        pretraining_loss_scales = {
+            "density_loss": float(initial_terms[1].numpy()),
+            "gravity_loss": float(initial_terms[2].numpy()),
+            "weighted_gravity_loss": float(initial_terms[3].numpy()),
+            "total_loss": float(initial_terms[4].numpy()),
+        }
+        (
+            output_directory / "pretraining_loss_scales.json"
+        ).write_text(
+            json.dumps(
+                {
+                    **pretraining_loss_scales,
+                    "gravity_loss_weight": config.gravity_loss_weight,
+                    "weighted_gravity_to_density_ratio": (
+                        pretraining_loss_scales["weighted_gravity_loss"]
+                        / pretraining_loss_scales["density_loss"]
+                    ),
+                    "maximum_permitted_ratio": 10.0,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        if (
+            pretraining_loss_scales["weighted_gravity_loss"]
+            > 10.0 * pretraining_loss_scales["density_loss"]
+        ):
+            raise RuntimeError(
+                "E07 pre-training loss-scale check failed: weighted "
+                "gravity loss exceeds ten times the density loss. "
+                f"Observed {pretraining_loss_scales}. Training stopped "
+                "without changing lambda_gravity."
+            )
+    else:
+        compile_baseline_model(model, model_config)
 
     best_model_path = (
         output_directory
@@ -865,14 +957,19 @@ def main() -> None:
         stop_training=config.stop_on_collapse,
     )
 
-    callbacks = [
-        tf.keras.callbacks.ModelCheckpoint(
+    checkpoint_callback: tf.keras.callbacks.Callback = (
+        SaveBestInversionModel(inversion_model, best_model_path)
+        if physics_training
+        else tf.keras.callbacks.ModelCheckpoint(
             filepath=str(best_model_path),
             monitor="val_loss",
             save_best_only=True,
             mode="min",
             verbose=1,
-        ),
+        )
+    )
+    callbacks = [
+        checkpoint_callback,
         tf.keras.callbacks.EarlyStopping(
             monitor="val_loss",
             patience=8,
@@ -923,6 +1020,8 @@ def main() -> None:
         f"{config.collapse_threshold:.6e} for "
         f"{config.collapse_patience} epoch(s)"
     )
+    if pretraining_loss_scales is not None:
+        print(f"Pre-training loss scales: {pretraining_loss_scales}")
 
     if gravity_scale_source is not None:
         print(
@@ -946,12 +1045,12 @@ def main() -> None:
         - training_start
     )
 
-    model.save(
+    inversion_model.save(
         final_model_path
     )
     (
         output_directory / "model_architecture.json"
-    ).write_text(model.to_json(indent=2), encoding="utf-8")
+    ).write_text(inversion_model.to_json(indent=2), encoding="utf-8")
 
     best_model = tf.keras.models.load_model(
         str(best_model_path),
@@ -1040,6 +1139,7 @@ def main() -> None:
             config.vertical_expansion
         ),
         architecture=config.architecture,
+        gravity_loss_weight=config.gravity_loss_weight,
         collapse_threshold=(
             config.collapse_threshold
         ),
@@ -1065,6 +1165,7 @@ def main() -> None:
         collapse_detection=(
             collapse_callback.result()
         ),
+        pretraining_loss_scales=pretraining_loss_scales,
     )
 
     print()

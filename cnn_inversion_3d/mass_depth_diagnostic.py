@@ -115,13 +115,16 @@ def compare_experiments(
     e05_directory: Path,
     e06_directory: Path,
     output_path: Path,
+    *,
+    baseline_label: str = "E05",
+    candidate_label: str = "E06",
 ) -> Path:
-    """Write a neutral side-by-side E05/E06 metric comparison."""
+    """Write a neutral side-by-side controlled-experiment comparison."""
 
     results: dict[str, Any] = {
         "scientific_question": (
-            "Does a learned depth-specific seed reduce vertical smearing and "
-            "improve density reconstruction and forward gravity consistency?"
+            f"How does {candidate_label} change density reconstruction, "
+            f"gravity consistency, mass, and depth relative to {baseline_label}?"
         ),
         "experiments": {},
         "interpretation_guidance": [
@@ -129,7 +132,10 @@ def compare_experiments(
             "Do not infer success from a single metric.",
         ],
     }
-    for label, directory in (("E05", e05_directory), ("E06", e06_directory)):
+    for label, directory in (
+        (baseline_label, e05_directory),
+        (candidate_label, e06_directory),
+    ):
         analysis = json.loads((directory / "test_analysis.json").read_text())
         diagnostic = json.loads(
             (directory / f"{label.lower()}_mass_depth_diagnostic_summary.json").read_text()
@@ -201,12 +207,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     diagnose = subparsers.add_parser("diagnose")
     diagnose.add_argument("--predictions", type=Path, required=True)
-    diagnose.add_argument("--label", choices=("e05", "e06"), required=True)
+    diagnose.add_argument(
+        "--label", choices=("e05", "e06", "e07"), required=True
+    )
     diagnose.add_argument("--threshold", type=float, default=0.1)
     compare = subparsers.add_parser("compare")
     compare.add_argument("--e05", type=Path, required=True)
     compare.add_argument("--e06", type=Path, required=True)
     compare.add_argument("--output", type=Path, required=True)
+    compare.add_argument("--baseline-label", default="E05")
+    compare.add_argument("--candidate-label", default="E06")
     return parser
 
 
@@ -227,6 +237,8 @@ def main() -> None:
             arguments.e05.resolve(),
             arguments.e06.resolve(),
             arguments.output.resolve(),
+            baseline_label=arguments.baseline_label,
+            candidate_label=arguments.candidate_label,
         )
         print(f"Comparison summary: {output}")
 

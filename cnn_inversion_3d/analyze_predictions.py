@@ -1183,10 +1183,13 @@ def main() -> None:
             **summarize_gravity_metric_rows(
                 gravity_batch_result.rows
             ),
-            "completed": (
+            "total_evaluated_samples": len(
+                gravity_batch_result.rows
+            ),
+            "computed_this_run": (
                 gravity_batch_result.completed
             ),
-            "skipped": (
+            "reused_existing_results": (
                 gravity_batch_result.skipped
             ),
             "failed": (
@@ -1276,10 +1279,15 @@ def main() -> None:
         print("Gravity consistency")
         print("-" * 19)
         print(
-            f"Completed: {gravity_batch_result.completed}"
+            "Total evaluated samples: "
+            f"{len(gravity_batch_result.rows)}"
         )
         print(
-            f"Skipped: {gravity_batch_result.skipped}"
+            f"Computed this run: {gravity_batch_result.completed}"
+        )
+        print(
+            "Reused existing results: "
+            f"{gravity_batch_result.skipped}"
         )
         print(
             f"Failed: {gravity_batch_result.failed}"
