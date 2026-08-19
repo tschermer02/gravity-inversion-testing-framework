@@ -738,7 +738,7 @@ def save_training_metadata(
         },
         "loss": {
             "name": (
-                "balanced_density_mse_plus_gravity_consistency"
+                "balanced_density_mse_plus_global_normalized_gravity_mse"
                 if config.gravity_loss_weight > 0.0
                 else "balanced_density_mse"
             ),
@@ -747,8 +747,8 @@ def save_training_metadata(
             ),
             "gravity_loss_weight": config.gravity_loss_weight,
             "gravity_loss_definition": (
-                "mean(||F(rho_pred)-G_true||_2^2 / "
-                "(||G_true||_2^2 + epsilon))"
+                "mean(square(F(rho_pred)/gravity_scale - "
+                "G_true/gravity_scale)) over all batch samples and pixels"
                 if config.gravity_loss_weight > 0.0
                 else None
             ),
@@ -756,6 +756,13 @@ def save_training_metadata(
                 1.0
                 - config.body_loss_fraction
             ),
+            "gravity_loss_normalization": (
+                "training_set_global_percentile_99"
+                if config.gravity_loss_weight > 0.0
+                else None
+            ),
+            "gravity_scale_mgal": config.gravity_scale,
+            "per_sample_gravity_loss_normalization": False,
         },
         "explicit_regularization": None,
         "observational_noise": None,
@@ -796,6 +803,81 @@ def save_training_metadata(
             metadata_file,
             indent=2,
         )
+
+
+def run_physics_preflight(
+    model: PhysicsConsistencyTrainingModel,
+    gravity: tf.Tensor,
+    density: tf.Tensor,
+    *,
+    learning_rate: float,
+) -> dict[str, float]:
+    """Measure E07 loss/gradient scale and a non-mutating optimizer step."""
+
+    variables = model.inversion_model.trainable_variables
+    with tf.GradientTape(persistent=True) as tape:
+        terms = model.compute_loss_terms(gravity, density, training=False)
+        density_loss = terms[1]
+        gravity_loss = terms[2]
+        weighted_gravity_loss = terms[3]
+    density_gradients = tape.gradient(density_loss, variables)
+    gravity_gradients = tape.gradient(gravity_loss, variables)
+    weighted_gradients = tape.gradient(weighted_gravity_loss, variables)
+    del tape
+
+    def gradient_norm(values: list[tf.Tensor | None]) -> float:
+        finite_values = [value for value in values if value is not None]
+        return float(tf.linalg.global_norm(finite_values).numpy())
+
+    density_gradient_norm = gradient_norm(density_gradients)
+    gravity_gradient_norm = gradient_norm(gravity_gradients)
+    weighted_gradient_norm = gradient_norm(weighted_gradients)
+
+    diagnostic_inversion = tf.keras.models.clone_model(model.inversion_model)
+    diagnostic_inversion.set_weights(model.inversion_model.get_weights())
+    diagnostic_model = PhysicsConsistencyTrainingModel(
+        diagnostic_inversion,
+        DifferentiableSinglePlaneGz(),
+        gravity_scale=model.gravity_scale,
+        gravity_loss_weight=model.gravity_loss_weight,
+        body_loss_fraction=model.density_loss_function.body_fraction,
+    )
+    diagnostic_model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate)
+    )
+    before = diagnostic_inversion(gravity, training=False)
+    diagnostic_model.train_on_batch(gravity, density)
+    after = diagnostic_inversion(gravity, training=False)
+    body_mask = tf.cast(density > 0.0, before.dtype)
+
+    def body_mean(values: tf.Tensor) -> float:
+        return float(
+            tf.math.divide_no_nan(
+                tf.reduce_sum(values * body_mask), tf.reduce_sum(body_mask)
+            ).numpy()
+        )
+
+    ratio = (
+        weighted_gradient_norm / density_gradient_norm
+        if density_gradient_norm > 0.0
+        else float("inf")
+    )
+    return {
+        "density_loss": float(density_loss.numpy()),
+        "gravity_loss": float(gravity_loss.numpy()),
+        "weighted_gravity_loss": float(weighted_gravity_loss.numpy()),
+        "total_loss": float(terms[4].numpy()),
+        "density_gradient_norm": density_gradient_norm,
+        "gravity_gradient_norm": gravity_gradient_norm,
+        "weighted_gravity_gradient_norm": weighted_gradient_norm,
+        "weighted_gravity_to_density_gradient_ratio": ratio,
+        "prediction_mean_before": float(tf.reduce_mean(before).numpy()),
+        "prediction_mean_after": float(tf.reduce_mean(after).numpy()),
+        "prediction_max_before": float(tf.reduce_max(before).numpy()),
+        "prediction_max_after": float(tf.reduce_max(after).numpy()),
+        "body_prediction_mean_before": body_mean(before),
+        "body_prediction_mean_after": body_mean(after),
+    }
 
 
 def main() -> None:
@@ -902,15 +984,25 @@ def main() -> None:
             )
         )
         sample_gravity, sample_density = next(iter(training_dataset))
-        initial_terms = model.compute_loss_terms(
-            sample_gravity, sample_density, training=False
+        pretraining_loss_scales = run_physics_preflight(
+            model,
+            sample_gravity,
+            sample_density,
+            learning_rate=config.learning_rate,
         )
-        pretraining_loss_scales = {
-            "density_loss": float(initial_terms[1].numpy()),
-            "gravity_loss": float(initial_terms[2].numpy()),
-            "weighted_gravity_loss": float(initial_terms[3].numpy()),
-            "total_loss": float(initial_terms[4].numpy()),
-        }
+        mean_collapsed = (
+            pretraining_loss_scales["prediction_mean_after"]
+            < 0.1 * pretraining_loss_scales["prediction_mean_before"]
+        )
+        maximum_collapsed = (
+            pretraining_loss_scales["prediction_max_after"]
+            < 0.1 * pretraining_loss_scales["prediction_max_before"]
+        )
+        gradient_failed = (
+            pretraining_loss_scales[
+                "weighted_gravity_to_density_gradient_ratio"
+            ] > 5.0
+        )
         (
             output_directory / "pretraining_loss_scales.json"
         ).write_text(
@@ -918,23 +1010,24 @@ def main() -> None:
                 {
                     **pretraining_loss_scales,
                     "gravity_loss_weight": config.gravity_loss_weight,
-                    "weighted_gravity_to_density_ratio": (
-                        pretraining_loss_scales["weighted_gravity_loss"]
-                        / pretraining_loss_scales["density_loss"]
+                    "maximum_permitted_weighted_gradient_ratio": 5.0,
+                    "gradient_safety_passed": not gradient_failed,
+                    "one_step_collapse_detected": (
+                        mean_collapsed or maximum_collapsed
                     ),
-                    "maximum_permitted_ratio": 10.0,
+                    "preflight_passed": not (
+                        gradient_failed or mean_collapsed or maximum_collapsed
+                    ),
                 },
                 indent=2,
             ),
             encoding="utf-8",
         )
-        if (
-            pretraining_loss_scales["weighted_gravity_loss"]
-            > 10.0 * pretraining_loss_scales["density_loss"]
-        ):
+        if gradient_failed or mean_collapsed or maximum_collapsed:
             raise RuntimeError(
-                "E07 pre-training loss-scale check failed: weighted "
-                "gravity loss exceeds ten times the density loss. "
+                "E07 pre-training safety check failed: weighted gravity "
+                "gradient exceeds five times the density gradient or the "
+                "copy-only optimizer step collapsed prediction magnitude. "
                 f"Observed {pretraining_loss_scales}. Training stopped "
                 "without changing lambda_gravity."
             )
@@ -954,7 +1047,7 @@ def main() -> None:
     collapse_callback = CollapseDetectionCallback(
         threshold=config.collapse_threshold,
         patience=config.collapse_patience,
-        stop_training=config.stop_on_collapse,
+        stop_training=(config.stop_on_collapse or physics_training),
     )
 
     checkpoint_callback: tf.keras.callbacks.Callback = (
@@ -1016,8 +1109,7 @@ def main() -> None:
         f"{config.gravity_scale_method}"
     )
     print(
-        "Collapse detection: validation maximum < "
-        f"{config.collapse_threshold:.6e} for "
+        "Collapse detection: robust near-zero validation criterion for "
         f"{config.collapse_patience} epoch(s)"
     )
     if pretraining_loss_scales is not None:
@@ -1147,7 +1239,7 @@ def main() -> None:
             config.collapse_patience
         ),
         stop_on_collapse=(
-            config.stop_on_collapse
+            config.stop_on_collapse or physics_training
         ),
         overwrite=(
             config.overwrite

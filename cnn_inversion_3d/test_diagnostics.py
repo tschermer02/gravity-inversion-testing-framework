@@ -86,6 +86,8 @@ def test_collapse_requires_consecutive_epochs() -> None:
         {
             "val_prediction_maximum": 1.0e-6,
             "val_prediction_mean": 1.0e-8,
+            "val_body_prediction_mean": 1.0e-8,
+            "val_prediction_fraction_above_1e_4": 0.0,
         },
     )
     assert callback.collapse_epoch is None
@@ -95,6 +97,8 @@ def test_collapse_requires_consecutive_epochs() -> None:
         {
             "val_prediction_maximum": 2.0e-6,
             "val_prediction_mean": 2.0e-8,
+            "val_body_prediction_mean": 2.0e-8,
+            "val_prediction_fraction_above_1e_4": 0.0,
         },
     )
 
@@ -120,18 +124,23 @@ def test_noncollapsed_epoch_resets_patience() -> None:
         0,
         {
             "val_prediction_maximum": 1.0e-6,
+            "val_prediction_mean": 1.0e-8,
         },
     )
     callback.on_epoch_end(
         1,
         {
             "val_prediction_maximum": 1.0e-3,
+            "val_prediction_mean": 1.0e-2,
+            "val_body_prediction_mean": 1.0e-2,
+            "val_prediction_fraction_above_1e_4": 0.5,
         },
     )
     callback.on_epoch_end(
         2,
         {
             "val_prediction_maximum": 1.0e-6,
+            "val_prediction_mean": 1.0e-8,
         },
     )
 

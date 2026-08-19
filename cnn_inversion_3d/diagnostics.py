@@ -511,14 +511,14 @@ class CollapseDetectionCallback(tf.keras.callbacks.Callback):
     Parameters
     ----------
     threshold
-        Validation prediction maximum below which an epoch is considered
-        collapsed.
+        Retained for backward-compatible configuration reporting. Collapse is
+        detected from the robust multi-metric criterion documented below.
     patience
         Number of consecutive collapsed epochs required for detection.
     stop_training
         Whether detection should stop model fitting.
-    monitor
-        Keras log key containing the validation prediction maximum.
+        monitor
+        Retained for backward-compatible result metadata.
     """
 
     def __init__(
@@ -563,18 +563,25 @@ class CollapseDetectionCallback(tf.keras.callbacks.Callback):
         """Inspect validation diagnostics after an epoch."""
 
         logs = logs or {}
-        monitored_value = logs.get(
-            self.monitor
+        required = (
+            "val_body_prediction_mean",
+            "val_prediction_fraction_above_1e_4",
+            "val_prediction_mean",
+            "val_prediction_maximum",
         )
-
-        if monitored_value is None:
+        if not any(key in logs for key in required):
             return
-
-        value = float(
-            monitored_value
+        body_mean = float(logs.get(required[0], float("inf")))
+        occupied_fraction = float(logs.get(required[1], float("inf")))
+        prediction_mean = float(logs.get(required[2], float("inf")))
+        prediction_maximum = float(logs.get(required[3], float("inf")))
+        collapsed = (
+            body_mean < 1.0e-4
+            or occupied_fraction < 1.0e-4
+            or (prediction_mean < 1.0e-6 and prediction_maximum < 1.0e-2)
         )
 
-        if value < self.threshold:
+        if collapsed:
             self.consecutive_epochs += 1
         else:
             self.consecutive_epochs = 0
@@ -598,8 +605,7 @@ class CollapseDetectionCallback(tf.keras.callbacks.Callback):
         print(
             "\nWARNING: likely all-zero prediction collapse detected "
             f"at epoch {self.collapse_epoch}: "
-            f"{self.monitor}={value:.6e} remained below "
-            f"{self.threshold:.6e} for "
+            "the robust validation criterion remained true for "
             f"{self.patience} consecutive epochs."
         )
 
@@ -619,6 +625,12 @@ class CollapseDetectionCallback(tf.keras.callbacks.Callback):
         return {
             "monitor": self.monitor,
             "threshold": self.threshold,
+            "criterion": (
+                "val_body_prediction_mean < 1e-4 OR "
+                "val_prediction_fraction_above_1e_4 < 1e-4 OR "
+                "(val_prediction_mean < 1e-6 AND "
+                "val_prediction_maximum < 1e-2)"
+            ),
             "patience": self.patience,
             "stop_training": self.stop_training,
             "detected": (

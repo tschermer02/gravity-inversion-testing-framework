@@ -9,7 +9,7 @@ from cnn_inversion_3d.dataset import DENSITY_SHAPE, SINGLE_PLANE_GRAVITY_SHAPE
 from cnn_inversion_3d.differentiable_gravity import (
     DifferentiableSinglePlaneGz,
     PhysicsConsistencyTrainingModel,
-    relative_gravity_loss,
+    global_normalized_gravity_mse,
 )
 from cnn_inversion_3d.model import (
     ModelConfig,
@@ -53,13 +53,20 @@ def test_differentiable_forward_gradient_exists_and_is_finite() -> None:
     assert np.all(np.isfinite(gradient.numpy()))
 
 
-def test_relative_gravity_loss_is_numerically_correct() -> None:
-    """Verify the per-sample normalized squared-L2 definition."""
+def test_global_normalized_gravity_mse_is_numerically_correct() -> None:
+    """Verify global scaling without a per-sample energy denominator."""
 
     true = tf.constant([[[[1.0]], [[2.0]]]], dtype=tf.float32)
     predicted = tf.constant([[[[2.0]], [[4.0]]]], dtype=tf.float32)
-    loss = relative_gravity_loss(true, predicted, epsilon=0.0)
-    assert float(loss.numpy()) == 1.0
+    loss = global_normalized_gravity_mse(
+        true, predicted, gravity_scale=2.0
+    )
+    assert float(loss.numpy()) == 0.625
+
+    weak = global_normalized_gravity_mse(
+        true * 0.01, predicted * 0.01, gravity_scale=2.0
+    )
+    assert float(weak.numpy()) < float(loss.numpy())
 
 
 def test_e07_total_loss_identity_and_tiny_step() -> None:
@@ -72,7 +79,7 @@ def test_e07_total_loss_identity_and_tiny_step() -> None:
         inversion,
         DifferentiableSinglePlaneGz(),
         gravity_scale=0.22938017547130585,
-        gravity_loss_weight=0.1,
+        gravity_loss_weight=0.001,
     )
     wrapper.compile(optimizer=tf.keras.optimizers.Adam(1.0e-3))
     gravity = np.ones((1, *SINGLE_PLANE_GRAVITY_SHAPE), np.float32) * 0.1
@@ -81,7 +88,7 @@ def test_e07_total_loss_identity_and_tiny_step() -> None:
     terms = wrapper.compute_loss_terms(gravity, density, training=False)
     np.testing.assert_allclose(
         terms[4].numpy(),
-        terms[1].numpy() + 0.1 * terms[2].numpy(),
+        terms[1].numpy() + 0.001 * terms[2].numpy(),
         rtol=1.0e-6,
     )
     logs = wrapper.train_on_batch(gravity, density, return_dict=True)

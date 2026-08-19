@@ -107,21 +107,19 @@ class DifferentiableSinglePlaneGz(tf.keras.layers.Layer):
         return surface[..., tf.newaxis]
 
 
-def relative_gravity_loss(
+def global_normalized_gravity_mse(
     true_gravity_mgal: tf.Tensor,
     predicted_gravity_mgal: tf.Tensor,
     *,
-    epsilon: float = 1.0e-12,
+    gravity_scale: float,
 ) -> tf.Tensor:
-    """Return batch-mean per-sample squared relative L2 gravity error."""
+    """Return global-scale-normalized MSE over all samples and pixels."""
 
     true_values = tf.cast(true_gravity_mgal, predicted_gravity_mgal.dtype)
-    axes = tuple(range(1, predicted_gravity_mgal.shape.rank))
-    numerator = tf.reduce_sum(
-        tf.square(predicted_gravity_mgal - true_values), axis=axes
+    scale = tf.cast(gravity_scale, predicted_gravity_mgal.dtype)
+    return tf.reduce_mean(
+        tf.square(predicted_gravity_mgal / scale - true_values / scale)
     )
-    denominator = tf.reduce_sum(tf.square(true_values), axis=axes)
-    return tf.reduce_mean(numerator / (denominator + epsilon))
 
 
 class PhysicsConsistencyTrainingModel(tf.keras.Model):
@@ -133,7 +131,7 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         forward_operator: DifferentiableSinglePlaneGz,
         *,
         gravity_scale: float,
-        gravity_loss_weight: float = 0.1,
+        gravity_loss_weight: float = 1.0e-3,
         body_loss_fraction: float = 0.5,
     ) -> None:
         super().__init__(name="e07_physics_consistency_training_wrapper")
@@ -146,14 +144,13 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         )
         self.total_loss_tracker = tf.keras.metrics.Mean(name="loss")
         self.density_loss_tracker = tf.keras.metrics.Mean(name="density_loss")
-        self.gravity_loss_tracker = tf.keras.metrics.Mean(name="gravity_loss")
+        self.gravity_loss_tracker = tf.keras.metrics.Mean(
+            name="gravity_normalized_mse"
+        )
         self.weighted_gravity_tracker = tf.keras.metrics.Mean(
             name="weighted_gravity_loss"
         )
         self.gravity_rmse_tracker = tf.keras.metrics.Mean(name="gravity_rmse")
-        self.gravity_relative_l2_tracker = tf.keras.metrics.Mean(
-            name="gravity_relative_l2"
-        )
         self.gravity_correlation_tracker = tf.keras.metrics.Mean(
             name="gravity_correlation"
         )
@@ -169,7 +166,6 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
             self.gravity_loss_tracker,
             self.weighted_gravity_tracker,
             self.gravity_rmse_tracker,
-            self.gravity_relative_l2_tracker,
             self.gravity_correlation_tracker,
             *self.density_diagnostics,
         ]
@@ -198,8 +194,10 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
             gravity_normalized * self.gravity_scale, tf.float32
         )
         predicted_gravity_mgal = self.forward_operator(predicted_density)
-        gravity_loss = relative_gravity_loss(
-            true_gravity_mgal, predicted_gravity_mgal
+        gravity_loss = global_normalized_gravity_mse(
+            true_gravity_mgal,
+            predicted_gravity_mgal,
+            gravity_scale=self.gravity_scale,
         )
         weighted_gravity = self.gravity_loss_weight * gravity_loss
         total_loss = density_loss + weighted_gravity
@@ -228,7 +226,6 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         self.gravity_loss_tracker.update_state(gravity_loss)
         self.weighted_gravity_tracker.update_state(weighted)
         self.gravity_rmse_tracker.update_state(tf.sqrt(tf.reduce_mean(residual**2)))
-        self.gravity_relative_l2_tracker.update_state(tf.sqrt(gravity_loss))
         true_flat = tf.reshape(true_gravity, (tf.shape(true_gravity)[0], -1))
         pred_flat = tf.reshape(predicted_gravity, (tf.shape(predicted_gravity)[0], -1))
         true_centered = true_flat - tf.reduce_mean(true_flat, axis=1, keepdims=True)

@@ -15,6 +15,7 @@
     "output_activation": "sigmoid",
     "vertical_expansion": "transpose",
     "architecture": "single_plane_2d3d",
+    "gravity_loss_weight": 0.0,
     "collapse_threshold": 1e-05,
     "collapse_patience": 2,
     "stop_on_collapse": false,
@@ -40,7 +41,7 @@
     "validation": 100,
     "test": 100
   },
-  "elapsed_seconds": 326564.1314139,
+  "elapsed_seconds": 7403.554604399949,
   "final_metrics": {
     "background_mse_component": 0.009295575320720673,
     "background_prediction_mean": 0.017870023846626282,
@@ -84,12 +85,14 @@
   "collapse_detection": {
     "monitor": "val_prediction_maximum",
     "threshold": 1e-05,
+    "criterion": "val_body_prediction_mean < 1e-4 OR val_prediction_fraction_above_1e_4 < 1e-4 OR (val_prediction_mean < 1e-6 AND val_prediction_maximum < 1e-2)",
     "patience": 2,
     "stop_training": false,
     "detected": false,
     "collapse_epoch": null,
     "diagnostics": null
   },
+  "pretraining_loss_scales": null,
   "best_epoch": 46,
   "best_validation_loss": 0.019394313916563988,
   "reproducibility": {
@@ -106,7 +109,12 @@
   "loss": {
     "name": "balanced_density_mse",
     "body_fraction": 0.5,
-    "background_fraction": 0.5
+    "gravity_loss_weight": 0.0,
+    "gravity_loss_definition": null,
+    "background_fraction": 0.5,
+    "gravity_loss_normalization": null,
+    "gravity_scale_mgal": 0.22938017547130585,
+    "per_sample_gravity_loss_normalization": false
   },
   "explicit_regularization": null,
   "observational_noise": null,
@@ -116,8 +124,9 @@
     "32 x 32 x 16 encoder features",
     "16 x 16 x 32 bottleneck features",
     "64 x 64 x 8 decoded lateral features",
-    "6 x 64 x 64 x 8 depth seed",
+    "6 x 64 x 64 x 8 repeated identical depth seed",
     "12 x 64 x 64 x 8 depth decoder",
+    "24 x 64 x 64 x 8 depth decoder",
     "24 x 64 x 64 x 1 density output"
   ]
 }
