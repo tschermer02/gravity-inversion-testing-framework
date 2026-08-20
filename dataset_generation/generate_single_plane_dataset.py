@@ -40,13 +40,33 @@ def _sample_body(
 ) -> dict[str, int | float]:
     """Sample one grid-aligned body fully inside the density domain."""
 
-    width_x = int(rng.integers(4, 17))
-    width_y = int(rng.integers(4, 17))
-    thickness = int(rng.integers(2, 9))
-    top = int(rng.integers(2, 9))
-    x_start = int(rng.integers(0, config.nx - width_x + 1))
-    y_start = int(rng.integers(0, config.ny - width_y + 1))
-    density = float(rng.uniform(0.2, 1.0))
+    width_x = int(rng.integers(
+        int(config.minimum_width_x_m / config.dx_m),
+        int(config.maximum_width_x_m / config.dx_m) + 1,
+    ))
+    width_y = int(rng.integers(
+        int(config.minimum_width_y_m / config.dy_m),
+        int(config.maximum_width_y_m / config.dy_m) + 1,
+    ))
+    thickness = int(rng.integers(
+        int(config.minimum_thickness_m / config.dz_m),
+        int(config.maximum_thickness_m / config.dz_m) + 1,
+    ))
+    top = int(rng.integers(
+        int(config.minimum_top_depth_m / config.dz_m),
+        int(config.maximum_top_depth_m / config.dz_m) + 1,
+    ))
+    minimum_start = config.horizontal_margin_cells
+    maximum_x_start = config.nx - config.horizontal_margin_cells - width_x
+    maximum_y_start = config.ny - config.horizontal_margin_cells - width_y
+    if maximum_x_start < minimum_start or maximum_y_start < minimum_start:
+        raise ValueError("Body dimensions are incompatible with the margin.")
+    x_start = int(rng.integers(minimum_start, maximum_x_start + 1))
+    y_start = int(rng.integers(minimum_start, maximum_y_start + 1))
+    density = float(rng.uniform(
+        config.minimum_density_contrast_g_cm3,
+        config.maximum_density_contrast_g_cm3,
+    ))
     return {
         "x_start": x_start,
         "x_end": x_start + width_x,
@@ -82,6 +102,78 @@ def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+
+
+def validate_canonical_dataset(
+    output: Path,
+    rows: list[dict[str, object]],
+    config: SinglePlaneReviewConfig,
+) -> dict[str, object]:
+    """Fail unless every generated sample satisfies canonical geometry."""
+
+    left = []
+    right = []
+    lower_y = []
+    upper_y = []
+    for row in rows:
+        sample_id = str(row["sample_id"])
+        with np.load(output / str(row["relative_path"])) as sample:
+            density_shape = sample["density"].shape
+            gravity_shape = sample["gravity"].shape
+        checks = {
+            "density shape": density_shape == config.density_shape,
+            "gravity shape": gravity_shape == config.gravity_shape,
+            "top depth": config.minimum_top_depth_m <= float(row["top_depth_m"]) <= config.maximum_top_depth_m,
+            "thickness": config.minimum_thickness_m <= float(row["thickness_z_m"]) <= config.maximum_thickness_m,
+            "width X": config.minimum_width_x_m <= float(row["width_x_m"]) <= config.maximum_width_x_m,
+            "width Y": config.minimum_width_y_m <= float(row["width_y_m"]) <= config.maximum_width_y_m,
+            "density contrast": config.minimum_density_contrast_g_cm3 <= float(row["density_contrast"]) <= config.maximum_density_contrast_g_cm3,
+            "bottom depth": float(row["bottom_depth_m"]) <= config.maximum_bottom_depth_m,
+            "left margin": int(row["x_start"]) >= config.horizontal_margin_cells,
+            "right margin": int(row["x_end"]) <= config.nx - config.horizontal_margin_cells,
+            "lower-Y margin": int(row["y_start"]) >= config.horizontal_margin_cells,
+            "upper-Y margin": int(row["y_end"]) <= config.ny - config.horizontal_margin_cells,
+        }
+        failures = [name for name, passed in checks.items() if not passed]
+        if failures:
+            raise RuntimeError(
+                f"Canonical validation failed for {sample_id}: {failures}"
+            )
+        left.append(int(row["x_start"]))
+        right.append(config.nx - int(row["x_end"]))
+        lower_y.append(int(row["y_start"]))
+        upper_y.append(config.ny - int(row["y_end"]))
+
+    def value_range(field: str) -> list[float]:
+        values = [float(row[field]) for row in rows]
+        return [min(values), max(values)]
+
+    clearances = {
+        "minimum_left_clearance_cells": min(left),
+        "minimum_right_clearance_cells": min(right),
+        "minimum_lower_y_clearance_cells": min(lower_y),
+        "minimum_upper_y_clearance_cells": min(upper_y),
+    }
+    summary: dict[str, object] = {
+        "passed": True,
+        "samples_validated": len(rows),
+        **clearances,
+        **{
+            key.replace("_cells", "_m"): value * config.dx_m
+            for key, value in clearances.items()
+        },
+        "top_depth_m_range": value_range("top_depth_m"),
+        "bottom_depth_m_range": value_range("bottom_depth_m"),
+        "width_x_m_range": value_range("width_x_m"),
+        "width_y_m_range": value_range("width_y_m"),
+        "thickness_m_range": value_range("thickness_z_m"),
+        "density_contrast_g_cm3_range": value_range("density_contrast"),
+        "density_shape": list(config.density_shape),
+        "gravity_shape": list(config.gravity_shape),
+    }
+    print("Canonical geometry validation passed")
+    print(json.dumps(summary, indent=2))
+    return summary
 
 
 def main() -> None:
@@ -151,6 +243,7 @@ def main() -> None:
     }
     for name, indices in split_indices.items():
         _write_csv(output / f"{name}_manifest.csv", [rows[int(i)] for i in indices])
+    validation_summary = validate_canonical_dataset(output, rows, config)
     training_absolute = np.concatenate([
         np.abs(np.load(output / rows[int(i)]["relative_path"])["gravity"]).ravel()
         for i in split_indices["train"]
@@ -179,11 +272,12 @@ def main() -> None:
         "scientific_change": "multi-height gravity observations to one horizontal surface gravity plane",
         "density_array_order": "density[z, y, x]",
         "gravity_array_order": "gravity[y, x]",
+        "dataset_geometry_version": config.dataset_geometry_version,
         "density_shape": list(config.density_shape),
-        "gravity_shape": [81, 81],
-        "cnn_gravity_shape": [81, 81, 1],
+        "gravity_shape": list(config.gravity_shape),
+        "cnn_gravity_shape": list(config.cnn_gravity_shape),
         "gravity_component": "Gz",
-        "gravity_channel": 4,
+        "gravity_channel": config.gravity_channel,
         "gravity_unit": "mGal",
         "density_unit": "g/cm3",
         "number_of_samples": total,
@@ -191,15 +285,22 @@ def main() -> None:
         "generation_seed": args.seed,
         "split_seed": args.split_seed,
         "normalization": distribution,
+        "geometry_validation": validation_summary,
         "observation_x_coordinates_m": config.observation_x_m.tolist(),
         "observation_y_coordinates_m": config.observation_y_m.tolist(),
         "observation_z_m": config.observation_z_m,
         "body_ranges": {
-            "top_depth_m": [20, 80], "width_x_m": [40, 160],
-            "width_y_m": [40, 160], "thickness_m": [20, 80],
-            "density_contrast_g_cm3": [0.2, 1.0],
-            "maximum_bottom_depth_m": 160, "bodies_per_sample": 1,
+            "top_depth_m": [config.minimum_top_depth_m, config.maximum_top_depth_m],
+            "width_x_m": [config.minimum_width_x_m, config.maximum_width_x_m],
+            "width_y_m": [config.minimum_width_y_m, config.maximum_width_y_m],
+            "thickness_m": [config.minimum_thickness_m, config.maximum_thickness_m],
+            "density_contrast_g_cm3": [config.minimum_density_contrast_g_cm3, config.maximum_density_contrast_g_cm3],
+            "maximum_bottom_depth_m": config.maximum_bottom_depth_m,
+            "horizontal_margin_cells": config.horizontal_margin_cells,
+            "horizontal_margin_m": config.horizontal_margin_m,
+            "bodies_per_sample": 1,
         },
+        "canonical_geometry": config.to_metadata(),
         "configuration": {
             "receiver_chunk_size": config.receiver_chunk_size,
             "receivers": {

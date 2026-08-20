@@ -1,0 +1,133 @@
+{
+  "training_configuration": {
+    "dataset_directory": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\datasets\\canonical_single_plane_train2000",
+    "output_directory": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\training_outputs\\E06_canonical_single_plane_learned_depth_seed_bf8",
+    "batch_size": 2,
+    "epochs": 100,
+    "body_loss_fraction": 0.5,
+    "gravity_scale": 0.22938017547130585,
+    "gravity_scale_summary": "C:\\Users\\tsche\\Code\\00_gravity_inversion_cnn_test\\datasets\\canonical_single_plane_train2000\\training_distribution.json",
+    "gravity_scale_method": "percentile_99",
+    "density_scale": 1.0,
+    "random_seed": 20260727,
+    "base_filters": 8,
+    "learning_rate": 0.001,
+    "output_activation": "sigmoid",
+    "vertical_expansion": "transpose",
+    "architecture": "single_plane_2d3d_learned_depth_seed",
+    "gravity_loss_weight": 0.0,
+    "collapse_threshold": 1e-05,
+    "collapse_patience": 2,
+    "stop_on_collapse": false,
+    "overwrite": true
+  },
+  "model_name": "single_plane_learned_depth_seed_inversion_cnn",
+  "model_input_shape": [
+    null,
+    81,
+    81,
+    1
+  ],
+  "model_output_shape": [
+    null,
+    24,
+    64,
+    64,
+    1
+  ],
+  "trainable_parameters": 36697,
+  "split_counts": {
+    "train": 2000,
+    "validation": 100,
+    "test": 100
+  },
+  "elapsed_seconds": 2040.813947299961,
+  "final_metrics": {
+    "background_mse_component": 0.003751755692064762,
+    "background_prediction_mean": 0.008067007176578045,
+    "body_mse_component": 0.03120049089193344,
+    "body_prediction_mean": 0.593584418296814,
+    "density_mae": 0.008536629378795624,
+    "density_mse": 0.0038279558066278696,
+    "loss": 0.017476122826337814,
+    "prediction_fraction_above_1e_4": 0.04751546308398247,
+    "prediction_maximum": 0.9601500630378723,
+    "prediction_mean": 0.010618760250508785,
+    "prediction_minimum": 0.0,
+    "prediction_standard_deviation": 0.07251863181591034
+  },
+  "final_epoch_diagnostics": {
+    "background_mse_component": 0.004932398907840252,
+    "background_prediction_mean": 0.009727699682116508,
+    "body_mse_component": 0.02540050446987152,
+    "body_prediction_mean": 0.6337873935699463,
+    "density_mae": 0.010294529609382153,
+    "density_mse": 0.0050215828232467175,
+    "loss": 0.015166454948484898,
+    "prediction_fraction_above_1e_4": 0.05384961888194084,
+    "prediction_maximum": 0.9994650483131409,
+    "prediction_mean": 0.012833832763135433,
+    "prediction_minimum": 0.0,
+    "prediction_standard_deviation": 0.08298632502555847,
+    "val_background_mse_component": 0.005645607598125935,
+    "val_background_prediction_mean": 0.010676057077944279,
+    "val_body_mse_component": 0.02504328079521656,
+    "val_body_prediction_mean": 0.6768454909324646,
+    "val_density_mae": 0.01128105167299509,
+    "val_density_mse": 0.0057430146262049675,
+    "val_loss": 0.015344444662332535,
+    "val_prediction_fraction_above_1e_4": 0.048928119242191315,
+    "val_prediction_maximum": 0.9808380603790283,
+    "val_prediction_mean": 0.014213589020073414,
+    "val_prediction_minimum": 0.0,
+    "val_prediction_standard_deviation": 0.08933766186237335
+  },
+  "collapse_detection": {
+    "monitor": "val_prediction_maximum",
+    "threshold": 1e-05,
+    "criterion": "val_body_prediction_mean < 1e-4 OR val_prediction_fraction_above_1e_4 < 1e-4 OR (val_prediction_mean < 1e-6 AND val_prediction_maximum < 1e-2)",
+    "patience": 2,
+    "stop_training": false,
+    "detected": false,
+    "collapse_epoch": null,
+    "diagnostics": null
+  },
+  "pretraining_loss_scales": null,
+  "best_epoch": 22,
+  "best_validation_loss": 0.015077713876962662,
+  "reproducibility": {
+    "seed": 20260727,
+    "seeded_libraries": [
+      "python.random",
+      "numpy",
+      "tensorflow",
+      "tf.data training shuffle"
+    ],
+    "bitwise_determinism_guaranteed": false,
+    "note": "Seeds provide practical repeatability, but TensorFlow kernels, hardware, threading, and oneDNN may still produce nondeterministic or numerically different results."
+  },
+  "loss": {
+    "name": "balanced_density_mse",
+    "body_fraction": 0.5,
+    "gravity_loss_weight": 0.0,
+    "gravity_loss_definition": null,
+    "background_fraction": 0.5,
+    "gravity_loss_normalization": null,
+    "gravity_scale_mgal": 0.22938017547130585,
+    "per_sample_gravity_loss_normalization": false
+  },
+  "explicit_regularization": null,
+  "observational_noise": null,
+  "dimensional_transformations": [
+    "81 x 81 x 1 surface Gz",
+    "64 x 64 x 8 full-plane resampled surface features",
+    "32 x 32 x 16 encoder features",
+    "16 x 16 x 32 bottleneck features",
+    "64 x 64 x 8 decoded lateral features",
+    "64 x 64 x 48 learned depth-channel features",
+    "6 x 64 x 64 x 8 learned depth seed",
+    "12 x 64 x 64 x 8 depth decoder",
+    "24 x 64 x 64 x 8 depth decoder",
+    "24 x 64 x 64 x 1 density output"
+  ]
+}

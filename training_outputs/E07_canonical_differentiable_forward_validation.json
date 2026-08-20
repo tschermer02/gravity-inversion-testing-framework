@@ -1,0 +1,85 @@
+{
+  "tolerance": 1e-05,
+  "maximum_relative_l2": 3.299844943196458e-16,
+  "gradient_valid": true,
+  "passed": true,
+  "cases": [
+    {
+      "case": "center_shallow_voxel",
+      "rmse_mgal": 2.4839712533582014e-19,
+      "maximum_absolute_error_mgal": 6.938893903907228e-18,
+      "relative_l2": 2.7315822860620694e-16,
+      "correlation": 0.9999999999999998
+    },
+    {
+      "case": "center_deep_voxel",
+      "rmse_mgal": 9.90215931365086e-21,
+      "maximum_absolute_error_mgal": 5.421010862427522e-20,
+      "relative_l2": 3.299844943196458e-16,
+      "correlation": 1.0
+    },
+    {
+      "case": "edge_shallow_voxel",
+      "rmse_mgal": 2.188427895721376e-19,
+      "maximum_absolute_error_mgal": 6.938893903907228e-18,
+      "relative_l2": 2.406584839332995e-16,
+      "correlation": 1.0
+    },
+    {
+      "case": "edge_deep_voxel",
+      "rmse_mgal": 6.900018245242838e-21,
+      "maximum_absolute_error_mgal": 4.0657581468206416e-20,
+      "relative_l2": 2.8028957787830223e-16,
+      "correlation": 1.0
+    },
+    {
+      "case": "rectangular_body",
+      "rmse_mgal": 7.900237990974453e-18,
+      "maximum_absolute_error_mgal": 1.1102230246251565e-16,
+      "relative_l2": 1.654109138496535e-16,
+      "correlation": 0.9999999999999999
+    },
+    {
+      "case": "random_sparse_density",
+      "rmse_mgal": 2.940863510349796e-19,
+      "maximum_absolute_error_mgal": 6.938893903907228e-18,
+      "relative_l2": 2.240418123621921e-16,
+      "correlation": 1.0
+    },
+    {
+      "case": "training_sample_001505",
+      "rmse_mgal": 2.320712509146522e-17,
+      "maximum_absolute_error_mgal": 2.220446049250313e-16,
+      "relative_l2": 2.7037412055271055e-16,
+      "correlation": 0.9999999999999997
+    },
+    {
+      "case": "training_sample_001918",
+      "rmse_mgal": 7.124978180162146e-18,
+      "maximum_absolute_error_mgal": 5.551115123125783e-17,
+      "relative_l2": 1.687469757237001e-16,
+      "correlation": 0.9999999999999998
+    },
+    {
+      "case": "training_sample_001891",
+      "rmse_mgal": 4.677721338831292e-18,
+      "maximum_absolute_error_mgal": 5.551115123125783e-17,
+      "relative_l2": 2.7042593032570063e-16,
+      "correlation": 0.9999999999999998
+    },
+    {
+      "case": "training_sample_001488",
+      "rmse_mgal": 8.604801205723928e-18,
+      "maximum_absolute_error_mgal": 1.1102230246251565e-16,
+      "relative_l2": 2.1551211249335416e-16,
+      "correlation": 0.9999999999999998
+    },
+    {
+      "case": "training_sample_000757",
+      "rmse_mgal": 3.572840662916473e-18,
+      "maximum_absolute_error_mgal": 2.7755575615628914e-17,
+      "relative_l2": 1.998568976807617e-16,
+      "correlation": 1.0
+    }
+  ]
+}

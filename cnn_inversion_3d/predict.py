@@ -16,6 +16,7 @@ from cnn_inversion_3d.dataset import (
     find_repository_root,
     load_npz_sample,
 )
+from cnn_inversion_3d.single_plane_review import SinglePlaneReviewConfig
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -358,6 +359,7 @@ def save_prediction_figure(
     predicted_density: np.ndarray,
     output_path: Path,
     sample_name: str,
+    sample_metadata: dict[str, str],
 ) -> None:
     """
     Save orthogonal true and predicted density sections.
@@ -435,24 +437,37 @@ def save_prediction_figure(
         - true_yz
     )
 
+    config = SinglePlaneReviewConfig()
     density_sections = (
         (
             true_xy,
             predicted_xy,
             difference_xy,
             "Horizontal X-Y",
+            (*config.density_x_edges_m, *config.density_y_edges_m),
+            "lower",
+            "X (m)",
+            "Y (m)",
         ),
         (
             true_xz,
             predicted_xz,
             difference_xz,
             "Vertical X-Z",
+            (*config.density_x_edges_m, config.density_z_edges_m[1], config.density_z_edges_m[0]),
+            "upper",
+            "X (m)",
+            "Depth (m)",
         ),
         (
             true_yz,
             predicted_yz,
             difference_yz,
             "Vertical Y-Z",
+            (*config.density_y_edges_m, config.density_z_edges_m[1], config.density_z_edges_m[0]),
+            "upper",
+            "Y (m)",
+            "Depth (m)",
         ),
     )
 
@@ -480,6 +495,10 @@ def save_prediction_figure(
         predicted_section,
         difference_section,
         section_name,
+        extent,
+        origin,
+        x_label,
+        y_label,
     ) in enumerate(
         density_sections
     ):
@@ -488,8 +507,9 @@ def save_prediction_figure(
             0,
         ].imshow(
             true_section,
-            origin="lower",
+            origin=origin,
             aspect="auto",
+            extent=extent,
             vmin=0.0,
             vmax=density_maximum,
         )
@@ -509,8 +529,9 @@ def save_prediction_figure(
             1,
         ].imshow(
             predicted_section,
-            origin="lower",
+            origin=origin,
             aspect="auto",
+            extent=extent,
             vmin=0.0,
             vmax=density_maximum,
         )
@@ -530,8 +551,9 @@ def save_prediction_figure(
             2,
         ].imshow(
             difference_section,
-            origin="lower",
+            origin=origin,
             aspect="auto",
+            extent=extent,
             vmin=-difference_limit,
             vmax=difference_limit,
             cmap="coolwarm",
@@ -547,8 +569,22 @@ def save_prediction_figure(
             label="Density difference [g/cm³]",
         )
 
+        for column_index in range(3):
+            axes[row_index, column_index].set_xlabel(x_label)
+            axes[row_index, column_index].set_ylabel(y_label)
+
+    geometry_text = (
+        f"Top depth: {float(sample_metadata['top_depth_m']):g} m | "
+        f"Bottom depth: {float(sample_metadata['bottom_depth_m']):g} m | "
+        f"Width X: {float(sample_metadata['width_x_m']):g} m | "
+        f"Width Y: {float(sample_metadata['width_y_m']):g} m | "
+        f"Thickness: {float(sample_metadata['thickness_z_m']):g} m\n"
+        f"Density contrast: {float(sample_metadata['density_contrast']):.3f} g/cm³ | "
+        f"Center X: {float(sample_metadata['center_x_m']):g} m | "
+        f"Center Y: {float(sample_metadata['center_y_m']):g} m"
+    )
     figure.suptitle(
-        f"3D density reconstruction: {sample_name}",
+        f"3D density reconstruction: {sample_name}\n{geometry_text}",
         fontsize=17,
     )
 
@@ -780,6 +816,7 @@ def main() -> None:
                 ),
                 output_path=figure_path,
                 sample_name=sample_name,
+                sample_metadata=row,
             )
 
         result = {

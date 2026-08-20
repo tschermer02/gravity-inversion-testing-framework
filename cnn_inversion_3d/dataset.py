@@ -10,6 +10,8 @@ import numpy as np
 import tensorflow as tf
 import math
 
+from cnn_inversion_3d.single_plane_review import SinglePlaneReviewConfig
+
 
 GRAVITY_SHAPE = (
     8,
@@ -18,18 +20,9 @@ GRAVITY_SHAPE = (
     1,
 )
 
-SINGLE_PLANE_GRAVITY_SHAPE = (
-    81,
-    81,
-    1,
-)
-
-DENSITY_SHAPE = (
-    24,
-    64,
-    64,
-    1,
-)
+_CANONICAL_SINGLE_PLANE = SinglePlaneReviewConfig()
+SINGLE_PLANE_GRAVITY_SHAPE = _CANONICAL_SINGLE_PLANE.cnn_gravity_shape
+DENSITY_SHAPE = (*_CANONICAL_SINGLE_PLANE.density_shape, 1)
 
 
 @dataclass(frozen=True)

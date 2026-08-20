@@ -30,6 +30,7 @@ FloatArray = npt.NDArray[np.float64]
 class SinglePlaneReviewConfig:
     """Physical configuration for the single-plane review scenario."""
 
+    dataset_geometry_version: str = "canonical_single_plane_v1"
     nx: int = 64
     ny: int = 64
     nz: int = 24
@@ -58,6 +59,7 @@ class SinglePlaneReviewConfig:
     minimum_density_contrast_g_cm3: float = 0.2
     maximum_density_contrast_g_cm3: float = 1.0
     maximum_bottom_depth_m: float = 160.0
+    horizontal_margin_cells: int = 8
     density_unit: str = "g/cm3"
     gravity_unit: str = "mGal"
     gravity_component: str = "Gz"
@@ -73,6 +75,26 @@ class SinglePlaneReviewConfig:
             self.ny,
             self.nx,
         )
+
+    @property
+    def gravity_shape(self) -> tuple[int, int]:
+        """Return the raw single-plane gravity shape in ``(y, x)`` order."""
+
+        return (self.observation_y_m.size, self.observation_x_m.size)
+
+    @property
+    def cnn_gravity_shape(self) -> tuple[int, int, int]:
+        """Return the channel-last CNN gravity input shape."""
+
+        return (*self.gravity_shape, 1)
+
+    @property
+    def horizontal_margin_m(self) -> float:
+        """Return the permanent horizontal body clearance in meters."""
+
+        if self.dx_m != self.dy_m:
+            raise ValueError("Canonical X/Y cell sizes must match.")
+        return self.horizontal_margin_cells * self.dx_m
 
     @property
     def density_x_max_center_m(self) -> float:
