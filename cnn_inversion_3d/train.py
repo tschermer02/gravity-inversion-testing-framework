@@ -91,6 +91,9 @@ class TrainingConfig:
         "multi_height_3d"
     )
     gravity_loss_weight: float = 0.0
+    volume_loss_weight: float = 0.0
+    volume_threshold: float = 0.1
+    volume_sharpness: float = 60.0
 
     collapse_threshold: float = 1.0e-5
     collapse_patience: int = 2
@@ -158,13 +161,19 @@ class TrainingConfig:
             raise ValueError("Unsupported architecture.")
         if self.gravity_loss_weight < 0.0:
             raise ValueError("gravity_loss_weight must not be negative.")
+        if self.volume_loss_weight < 0.0:
+            raise ValueError("volume_loss_weight must not be negative.")
+        if not 0.0 < self.volume_threshold < 1.0:
+            raise ValueError("volume_threshold must be between zero and one.")
+        if self.volume_sharpness <= 0.0:
+            raise ValueError("volume_sharpness must be greater than zero.")
         if (
-            self.gravity_loss_weight > 0.0
+            (self.gravity_loss_weight > 0.0 or self.volume_loss_weight > 0.0)
             and self.architecture
             != "single_plane_2d3d_learned_depth_seed"
         ):
             raise ValueError(
-                "Gravity consistency training requires the E06 "
+                "Physics/volume consistency training requires the E06 "
                 "single_plane_2d3d_learned_depth_seed architecture."
             )
 
@@ -270,8 +279,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Differentiable relative-L2 gravity loss weight. Default 0 "
-            "preserves all existing training objectives; E07 uses 0.1."
+            "preserves all existing training objectives; canonical E07 uses 0.001."
         ),
+    )
+
+    parser.add_argument(
+        "--volume-loss-weight", type=float, default=None,
+        help="Weight for soft occupied-volume-fraction MSE. Default 0 preserves E07.",
+    )
+    parser.add_argument(
+        "--volume-threshold", type=float, default=None,
+        help="Density midpoint for soft occupancy. Default: 0.1 g/cm^3.",
+    )
+    parser.add_argument(
+        "--volume-sharpness", type=float, default=None,
+        help="Sigmoid sharpness for soft occupancy. Default: 60.",
     )
 
     parser.add_argument(
@@ -407,6 +429,12 @@ def apply_arguments(
         values["architecture"] = arguments.architecture
     if arguments.gravity_loss_weight is not None:
         values["gravity_loss_weight"] = arguments.gravity_loss_weight
+    if arguments.volume_loss_weight is not None:
+        values["volume_loss_weight"] = arguments.volume_loss_weight
+    if arguments.volume_threshold is not None:
+        values["volume_threshold"] = arguments.volume_threshold
+    if arguments.volume_sharpness is not None:
+        values["volume_sharpness"] = arguments.volume_sharpness
 
     if arguments.learning_rate is not None:
         values["learning_rate"] = (
@@ -694,6 +722,7 @@ def save_training_metadata(
             training_configuration
         ),
         "model_name": model.name,
+        "optimizer": "Adam",
         "model_input_shape": list(
             model.input_shape
         ),
@@ -738,7 +767,9 @@ def save_training_metadata(
         },
         "loss": {
             "name": (
-                "balanced_density_mse_plus_global_normalized_gravity_mse"
+                "balanced_density_mse_plus_global_normalized_gravity_mse_plus_soft_volume_fraction_mse"
+                if config.volume_loss_weight > 0.0
+                else "balanced_density_mse_plus_global_normalized_gravity_mse"
                 if config.gravity_loss_weight > 0.0
                 else "balanced_density_mse"
             ),
@@ -763,8 +794,23 @@ def save_training_metadata(
             ),
             "gravity_scale_mgal": config.gravity_scale,
             "per_sample_gravity_loss_normalization": False,
+            "volume_loss_weight": config.volume_loss_weight,
+            "volume_threshold": config.volume_threshold,
+            "volume_sigmoid_sharpness": config.volume_sharpness,
+            "volume_loss_definition": (
+                "mean_batch((mean_voxels(sigmoid(k*(rho_pred-threshold))) - "
+                "mean_voxels(rho_true>0))^2)"
+                if config.volume_loss_weight > 0.0 else None
+            ),
+            "loss_equation": (
+                "BalancedDensityMSE + gravity_loss_weight * global_normalized_gravity_mse "
+                "+ volume_loss_weight * soft_occupied_fraction_mse"
+            ),
         },
-        "explicit_regularization": None,
+        "explicit_regularization": (
+            "bidirectional_soft_occupied_volume_fraction_constraint"
+            if config.volume_loss_weight > 0.0 else None
+        ),
         "observational_noise": None,
     }
 
@@ -812,7 +858,7 @@ def run_physics_preflight(
     *,
     learning_rate: float,
 ) -> dict[str, float]:
-    """Measure E07 loss/gradient scale and a non-mutating optimizer step."""
+    """Measure E07/E08 loss and gradient scales without mutating the model."""
 
     variables = model.inversion_model.trainable_variables
     with tf.GradientTape(persistent=True) as tape:
@@ -820,9 +866,13 @@ def run_physics_preflight(
         density_loss = terms[1]
         gravity_loss = terms[2]
         weighted_gravity_loss = terms[3]
+        volume_loss = terms[5]
+        weighted_volume_loss = terms[6]
     density_gradients = tape.gradient(density_loss, variables)
     gravity_gradients = tape.gradient(gravity_loss, variables)
     weighted_gradients = tape.gradient(weighted_gravity_loss, variables)
+    volume_gradients = tape.gradient(volume_loss, variables)
+    weighted_volume_gradients = tape.gradient(weighted_volume_loss, variables)
     del tape
 
     def gradient_norm(values: list[tf.Tensor | None]) -> float:
@@ -832,6 +882,8 @@ def run_physics_preflight(
     density_gradient_norm = gradient_norm(density_gradients)
     gravity_gradient_norm = gradient_norm(gravity_gradients)
     weighted_gradient_norm = gradient_norm(weighted_gradients)
+    volume_gradient_norm = gradient_norm(volume_gradients)
+    weighted_volume_gradient_norm = gradient_norm(weighted_volume_gradients)
 
     diagnostic_inversion = tf.keras.models.clone_model(model.inversion_model)
     diagnostic_inversion.set_weights(model.inversion_model.get_weights())
@@ -841,6 +893,9 @@ def run_physics_preflight(
         gravity_scale=model.gravity_scale,
         gravity_loss_weight=model.gravity_loss_weight,
         body_loss_fraction=model.density_loss_function.body_fraction,
+        volume_loss_weight=model.volume_loss_weight,
+        volume_threshold=model.volume_threshold,
+        volume_sharpness=model.volume_sharpness,
     )
     diagnostic_model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate)
@@ -862,15 +917,30 @@ def run_physics_preflight(
         if density_gradient_norm > 0.0
         else float("inf")
     )
+    volume_ratio = (
+        weighted_volume_gradient_norm / density_gradient_norm
+        if density_gradient_norm > 0.0
+        else float("inf")
+    )
     return {
         "density_loss": float(density_loss.numpy()),
         "gravity_loss": float(gravity_loss.numpy()),
         "weighted_gravity_loss": float(weighted_gravity_loss.numpy()),
+        "volume_loss": float(volume_loss.numpy()),
+        "weighted_volume_loss": float(weighted_volume_loss.numpy()),
         "total_loss": float(terms[4].numpy()),
         "density_gradient_norm": density_gradient_norm,
         "gravity_gradient_norm": gravity_gradient_norm,
         "weighted_gravity_gradient_norm": weighted_gradient_norm,
+        "volume_gradient_norm": volume_gradient_norm,
+        "weighted_volume_gradient_norm": weighted_volume_gradient_norm,
         "weighted_gravity_to_density_gradient_ratio": ratio,
+        "weighted_volume_to_density_gradient_ratio": volume_ratio,
+        "true_occupied_fraction": float(terms[7].numpy()),
+        "predicted_soft_occupied_fraction": float(terms[8].numpy()),
+        "soft_volume_fraction_ratio": float(
+            tf.math.divide_no_nan(terms[8], terms[7]).numpy()
+        ),
         "prediction_mean_before": float(tf.reduce_mean(before).numpy()),
         "prediction_mean_after": float(tf.reduce_mean(after).numpy()),
         "prediction_max_before": float(tf.reduce_max(before).numpy()),
@@ -968,7 +1038,9 @@ def main() -> None:
     else:
         model = build_baseline_model(model_config)
     inversion_model = model
-    physics_training = config.gravity_loss_weight > 0.0
+    physics_training = (
+        config.gravity_loss_weight > 0.0 or config.volume_loss_weight > 0.0
+    )
     pretraining_loss_scales: dict[str, float] | None = None
     if physics_training:
         model = PhysicsConsistencyTrainingModel(
@@ -977,6 +1049,9 @@ def main() -> None:
             gravity_scale=resolved_gravity_scale,
             gravity_loss_weight=config.gravity_loss_weight,
             body_loss_fraction=config.body_loss_fraction,
+            volume_loss_weight=config.volume_loss_weight,
+            volume_threshold=config.volume_threshold,
+            volume_sharpness=config.volume_sharpness,
         )
         model.compile(
             optimizer=tf.keras.optimizers.Adam(
@@ -1003,6 +1078,11 @@ def main() -> None:
                 "weighted_gravity_to_density_gradient_ratio"
             ] > 5.0
         )
+        volume_gradient_failed = (
+            pretraining_loss_scales[
+                "weighted_volume_to_density_gradient_ratio"
+            ] > 5.0
+        )
         (
             output_directory / "pretraining_loss_scales.json"
         ).write_text(
@@ -1010,22 +1090,28 @@ def main() -> None:
                 {
                     **pretraining_loss_scales,
                     "gravity_loss_weight": config.gravity_loss_weight,
+                    "volume_loss_weight": config.volume_loss_weight,
+                    "volume_threshold": config.volume_threshold,
+                    "volume_sigmoid_sharpness": config.volume_sharpness,
                     "maximum_permitted_weighted_gradient_ratio": 5.0,
-                    "gradient_safety_passed": not gradient_failed,
+                    "gradient_safety_passed": not (
+                        gradient_failed or volume_gradient_failed
+                    ),
                     "one_step_collapse_detected": (
                         mean_collapsed or maximum_collapsed
                     ),
                     "preflight_passed": not (
-                        gradient_failed or mean_collapsed or maximum_collapsed
+                        gradient_failed or volume_gradient_failed
+                        or mean_collapsed or maximum_collapsed
                     ),
                 },
                 indent=2,
             ),
             encoding="utf-8",
         )
-        if gradient_failed or mean_collapsed or maximum_collapsed:
+        if gradient_failed or volume_gradient_failed or mean_collapsed or maximum_collapsed:
             raise RuntimeError(
-                "E07 pre-training safety check failed: weighted gravity "
+                "E07/E08 pre-training safety check failed: a weighted auxiliary "
                 "gradient exceeds five times the density gradient or the "
                 "copy-only optimizer step collapsed prediction magnitude. "
                 f"Observed {pretraining_loss_scales}. Training stopped "
@@ -1232,6 +1318,9 @@ def main() -> None:
         ),
         architecture=config.architecture,
         gravity_loss_weight=config.gravity_loss_weight,
+        volume_loss_weight=config.volume_loss_weight,
+        volume_threshold=config.volume_threshold,
+        volume_sharpness=config.volume_sharpness,
         collapse_threshold=(
             config.collapse_threshold
         ),

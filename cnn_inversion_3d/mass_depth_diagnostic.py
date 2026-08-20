@@ -208,7 +208,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     diagnose = subparsers.add_parser("diagnose")
     diagnose.add_argument("--predictions", type=Path, required=True)
     diagnose.add_argument(
-        "--label", choices=("e05", "e06", "e07"), required=True
+        "--label", choices=("e05", "e06", "e07", "e08"), required=True
     )
     diagnose.add_argument("--threshold", type=float, default=0.1)
     compare = subparsers.add_parser("compare")

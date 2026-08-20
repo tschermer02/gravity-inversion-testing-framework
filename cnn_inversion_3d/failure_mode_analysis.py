@@ -112,7 +112,13 @@ def collect(root: Path, dataset: Path) -> tuple[list[dict[str, Any]], dict[str, 
     experiment_ids: dict[str, list[str]] = {}
     directories: dict[str, Path] = {}
     for label, dirname in EXPERIMENTS.items():
-        directory = root / "prediction_outputs" / dirname
+        directory = Path(dirname)
+        if not directory.is_absolute():
+            directory = (
+                root / directory
+                if directory.parts and directory.parts[0] == "prediction_outputs"
+                else root / "prediction_outputs" / directory
+            )
         directories[label] = directory
         with (directory / "prediction_metrics.json").open(encoding="utf-8") as stream:
             rows = json.load(stream)
@@ -223,20 +229,23 @@ def paired(by_experiment: dict[str, list[dict[str, Any]]]) -> tuple[list[dict[st
     metrics = ("mse", "mae", "iou", "dice", "volume_ratio", "mass_ratio",
                "absolute_top_depth_error_m", "absolute_bottom_depth_error_m",
                "absolute_thickness_error_m", "gravity_rmse")
+    transitions = [("E05", "E06"), ("E06", "E07"), ("E05", "E07")]
+    if "E08" in by_experiment:
+        transitions.append(("E07", "E08"))
     rows = []
     for sid in maps["E05"]:
         row: dict[str, Any] = {"sample_id": sid}
         for label in EXPERIMENTS:
             for metric in metrics:
                 row[f"{label}_{metric}"] = maps[label][sid][metric]
-        for old, new in (("E05", "E06"), ("E06", "E07"), ("E05", "E07")):
+        for old, new in transitions:
             tag = f"{old}_to_{new}"
             for metric in metrics:
                 row[f"{tag}_{metric}_change"] = maps[new][sid][metric] - maps[old][sid][metric]
         rows.append(row)
 
     comparisons = []
-    for old, new in (("E05", "E06"), ("E06", "E07"), ("E05", "E07")):
+    for old, new in transitions:
         result: dict[str, Any] = {"comparison": f"{old} -> {new}"}
         for metric in ("mse", "mae", "iou", "dice", "absolute_top_depth_error_m",
                        "absolute_bottom_depth_error_m", "absolute_thickness_error_m", "gravity_rmse"):
@@ -328,7 +337,7 @@ def plots(output: Path, overall: list[dict[str, Any]], by: dict[str, list[dict[s
     figures = output / "figures"
     figures.mkdir(parents=True, exist_ok=True)
     labels = list(EXPERIMENTS)
-    colors = ["#6b7280", "#2563eb", "#dc2626"]
+    colors = ["#6b7280", "#2563eb", "#dc2626", "#059669"]
     fig, axes = plt.subplots(1, 3, figsize=(11, 3.4))
     for ax, metric, title in zip(axes, ("mse", "dice", "iou"), ("MSE (lower is better)", "Dice", "IoU")):
         ax.bar(labels, [r[f"mean_{metric}"] for r in overall], color=colors)
@@ -391,6 +400,15 @@ def make_readme(overall: list[dict[str, Any]], comparisons: list[dict[str, Any]]
                            ("Better thickness", "percent_samples_better_thickness")):
             lines.append(f"| {label} | {row[key]:.1f}% |")
         return "\n".join(lines)
+    e08_section = ""
+    if "E07 -> E08" in comp:
+        e08_section = f"""
+## E07 -> E08 paired result
+
+{transition('E07 -> E08')}
+
+{paired_table('E07 -> E08')}
+"""
     return f"""# E05 / E06 / E07 Failure-Mode Analysis
 
 ## What was analyzed
@@ -416,6 +434,7 @@ No model was loaded, no dataset was regenerated, and no prediction or forward-gr
 {transition('E05 -> E07')}
 
 {paired_table('E05 -> E07')}
+{e08_section}
 
 ## Current E07 failure mode
 
@@ -433,7 +452,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=Path("datasets/canonical_single_plane_train2000"))
     parser.add_argument("--output", type=Path, default=Path("analysis_outputs/E05_E06_E07_failure_mode_analysis"))
+    parser.add_argument(
+        "--e08-predictions", type=Path, default=None,
+        help="Optional E08 prediction directory for an additive E07-to-E08 comparison.",
+    )
     args = parser.parse_args()
+    if args.e08_predictions is not None:
+        EXPERIMENTS["E08"] = str(args.e08_predictions)
     root = Path.cwd()
     output = args.output.resolve(); output.mkdir(parents=True, exist_ok=True)
     all_rows, by = collect(root, args.dataset.resolve())

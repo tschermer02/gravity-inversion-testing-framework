@@ -122,6 +122,50 @@ def global_normalized_gravity_mse(
     )
 
 
+def soft_occupied_fraction(
+    density: tf.Tensor,
+    *,
+    threshold: float = 0.1,
+    sharpness: float = 60.0,
+) -> tf.Tensor:
+    """Return each sample's differentiable occupied-volume fraction.
+
+    Density is expected to have shape ``(batch,z,y,x,channels)``.  A
+    sharpness of 60 keeps the zero-density occupancy floor near 0.0025 while
+    retaining strong gradients around the project's 0.1 g/cm^3 threshold.
+    """
+
+    values = tf.convert_to_tensor(density)
+    occupancy = tf.sigmoid(
+        tf.cast(sharpness, values.dtype)
+        * (values - tf.cast(threshold, values.dtype))
+    )
+    return tf.reduce_mean(occupancy, axis=tf.range(1, tf.rank(occupancy)))
+
+
+def occupied_volume_fraction_mse(
+    true_density: tf.Tensor,
+    predicted_density: tf.Tensor,
+    *,
+    threshold: float = 0.1,
+    sharpness: float = 60.0,
+) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+    """Return batch MSE between true and predicted occupied fractions.
+
+    Truth uses the known binary support (strictly positive density), while the
+    prediction uses :func:`soft_occupied_fraction`.  The returned values are
+    ``(loss, true_fraction_mean, predicted_soft_fraction_mean)``.
+    """
+
+    prediction_fraction = soft_occupied_fraction(
+        predicted_density, threshold=threshold, sharpness=sharpness
+    )
+    truth = tf.cast(true_density > 0.0, predicted_density.dtype)
+    truth_fraction = tf.reduce_mean(truth, axis=tf.range(1, tf.rank(truth)))
+    loss = tf.reduce_mean(tf.square(prediction_fraction - truth_fraction))
+    return loss, tf.reduce_mean(truth_fraction), tf.reduce_mean(prediction_fraction)
+
+
 class PhysicsConsistencyTrainingModel(tf.keras.Model):
     """Train an unchanged inversion model with the additive E07 objective."""
 
@@ -133,12 +177,18 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         gravity_scale: float,
         gravity_loss_weight: float = 1.0e-3,
         body_loss_fraction: float = 0.5,
+        volume_loss_weight: float = 0.0,
+        volume_threshold: float = 0.1,
+        volume_sharpness: float = 60.0,
     ) -> None:
         super().__init__(name="e07_physics_consistency_training_wrapper")
         self.inversion_model = inversion_model
         self.forward_operator = forward_operator
         self.gravity_scale = float(gravity_scale)
         self.gravity_loss_weight = float(gravity_loss_weight)
+        self.volume_loss_weight = float(volume_loss_weight)
+        self.volume_threshold = float(volume_threshold)
+        self.volume_sharpness = float(volume_sharpness)
         self.density_loss_function = BalancedDensityMSE(
             body_fraction=body_loss_fraction
         )
@@ -149,6 +199,15 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         )
         self.weighted_gravity_tracker = tf.keras.metrics.Mean(
             name="weighted_gravity_loss"
+        )
+        self.volume_loss_tracker = tf.keras.metrics.Mean(name="volume_fraction_mse")
+        self.weighted_volume_tracker = tf.keras.metrics.Mean(name="weighted_volume_loss")
+        self.true_occupied_fraction_tracker = tf.keras.metrics.Mean(name="true_occupied_fraction")
+        self.predicted_occupied_fraction_tracker = tf.keras.metrics.Mean(
+            name="predicted_soft_occupied_fraction"
+        )
+        self.volume_fraction_ratio_tracker = tf.keras.metrics.Mean(
+            name="soft_volume_fraction_ratio"
         )
         self.gravity_rmse_tracker = tf.keras.metrics.Mean(name="gravity_rmse")
         self.gravity_correlation_tracker = tf.keras.metrics.Mean(
@@ -165,6 +224,11 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
             self.density_loss_tracker,
             self.gravity_loss_tracker,
             self.weighted_gravity_tracker,
+            self.volume_loss_tracker,
+            self.weighted_volume_tracker,
+            self.true_occupied_fraction_tracker,
+            self.predicted_occupied_fraction_tracker,
+            self.volume_fraction_ratio_tracker,
             self.gravity_rmse_tracker,
             self.gravity_correlation_tracker,
             *self.density_diagnostics,
@@ -181,8 +245,8 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         true_density: tf.Tensor,
         *,
         training: bool,
-    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        """Return prediction, density, gravity, weighted, and total losses."""
+    ) -> tuple[tf.Tensor, ...]:
+        """Return E07 terms followed by E08 volume terms and fractions."""
 
         predicted_density = self.inversion_model(
             gravity_normalized, training=training
@@ -200,24 +264,36 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
             gravity_scale=self.gravity_scale,
         )
         weighted_gravity = self.gravity_loss_weight * gravity_loss
-        total_loss = density_loss + weighted_gravity
+        volume_loss, true_fraction, predicted_fraction = occupied_volume_fraction_mse(
+            true_density,
+            predicted_density,
+            threshold=self.volume_threshold,
+            sharpness=self.volume_sharpness,
+        )
+        weighted_volume = self.volume_loss_weight * volume_loss
+        total_loss = density_loss + weighted_gravity + weighted_volume
         return (
             predicted_density,
             density_loss,
             gravity_loss,
             weighted_gravity,
             total_loss,
+            volume_loss,
+            weighted_volume,
+            true_fraction,
+            predicted_fraction,
         )
 
     def _update_metrics(
         self,
         gravity_normalized: tf.Tensor,
         true_density: tf.Tensor,
-        terms: tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor],
+        terms: tuple[tf.Tensor, ...],
     ) -> None:
         """Update loss, gravity, and existing density diagnostics."""
 
-        prediction, density_loss, gravity_loss, weighted, total = terms
+        prediction, density_loss, gravity_loss, weighted, total = terms[:5]
+        volume_loss, weighted_volume, true_fraction, predicted_fraction = terms[5:9]
         true_gravity = tf.cast(gravity_normalized * self.gravity_scale, tf.float32)
         predicted_gravity = self.forward_operator(prediction)
         residual = predicted_gravity - true_gravity
@@ -225,6 +301,13 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         self.density_loss_tracker.update_state(density_loss)
         self.gravity_loss_tracker.update_state(gravity_loss)
         self.weighted_gravity_tracker.update_state(weighted)
+        self.volume_loss_tracker.update_state(volume_loss)
+        self.weighted_volume_tracker.update_state(weighted_volume)
+        self.true_occupied_fraction_tracker.update_state(true_fraction)
+        self.predicted_occupied_fraction_tracker.update_state(predicted_fraction)
+        self.volume_fraction_ratio_tracker.update_state(
+            tf.math.divide_no_nan(predicted_fraction, true_fraction)
+        )
         self.gravity_rmse_tracker.update_state(tf.sqrt(tf.reduce_mean(residual**2)))
         true_flat = tf.reshape(true_gravity, (tf.shape(true_gravity)[0], -1))
         pred_flat = tf.reshape(predicted_gravity, (tf.shape(predicted_gravity)[0], -1))
@@ -243,7 +326,7 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         gravity, density, _ = tf.keras.utils.unpack_x_y_sample_weight(data)
         with tf.GradientTape() as tape:
             terms = self.compute_loss_terms(gravity, density, training=True)
-        gradients = tape.gradient(terms[-1], self.inversion_model.trainable_variables)
+        gradients = tape.gradient(terms[4], self.inversion_model.trainable_variables)
         self.optimizer.apply_gradients(
             zip(gradients, self.inversion_model.trainable_variables)
         )

@@ -10,6 +10,8 @@ from cnn_inversion_3d.differentiable_gravity import (
     DifferentiableSinglePlaneGz,
     PhysicsConsistencyTrainingModel,
     global_normalized_gravity_mse,
+    occupied_volume_fraction_mse,
+    soft_occupied_fraction,
 )
 from cnn_inversion_3d.model import (
     ModelConfig,
@@ -94,3 +96,40 @@ def test_e07_total_loss_identity_and_tiny_step() -> None:
     logs = wrapper.train_on_batch(gravity, density, return_dict=True)
     assert np.isfinite(logs["loss"])
     assert wrapper.inversion_model is inversion
+
+
+def test_soft_occupied_fraction_has_expected_bidirectional_loss() -> None:
+    """Verify matching support is preferred over both excess and deficit."""
+
+    truth = tf.constant([[[[[0.5]], [[0.0]], [[0.0]], [[0.0]]]]])
+    matched = tf.constant([[[[[0.5]], [[0.0]], [[0.0]], [[0.0]]]]])
+    excess = tf.constant([[[[[0.5]], [[0.5]], [[0.5]], [[0.0]]]]])
+    deficit = tf.zeros_like(truth)
+    matched_loss = occupied_volume_fraction_mse(truth, matched)[0]
+    excess_loss = occupied_volume_fraction_mse(truth, excess)[0]
+    deficit_loss = occupied_volume_fraction_mse(truth, deficit)[0]
+    assert float(matched_loss.numpy()) < float(excess_loss.numpy())
+    assert float(matched_loss.numpy()) < float(deficit_loss.numpy())
+
+
+def test_soft_occupied_fraction_gradient_reduces_excess_volume() -> None:
+    """Verify gradient descent pushes excessive soft occupancy downward."""
+
+    truth = tf.constant([[[[[0.5]], [[0.0]], [[0.0]], [[0.0]]]]])
+    prediction = tf.Variable([[[[[0.5]], [[0.2]], [[0.2]], [[0.2]]]]])
+    with tf.GradientTape() as tape:
+        loss = occupied_volume_fraction_mse(truth, prediction)[0]
+    gradient = tape.gradient(loss, prediction)
+    assert gradient is not None
+    assert np.all(np.isfinite(gradient.numpy()))
+    assert float(gradient.numpy()[0, 0, 1, 0, 0]) > 0.0
+
+
+def test_soft_occupancy_default_has_nonzero_threshold_gradient() -> None:
+    """Verify the default sharpness retains a useful local derivative."""
+
+    density = tf.Variable([[[[[0.1]]]]], dtype=tf.float32)
+    with tf.GradientTape() as tape:
+        fraction = soft_occupied_fraction(density)
+    gradient = tape.gradient(fraction, density)
+    np.testing.assert_allclose(gradient.numpy(), 15.0, rtol=1.0e-6)
