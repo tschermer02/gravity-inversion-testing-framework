@@ -26,11 +26,14 @@ from cnn_inversion_3d.differentiable_gravity import (
     DifferentiableSinglePlaneGz,
     PhysicsConsistencyTrainingModel,
     SaveBestInversionModel,
+    excess_occupied_volume_fraction_mse,
+    soft_occupied_fraction,
 )
 from cnn_inversion_3d.model import (
     ModelConfig,
     VerticalExpansion,
     build_baseline_model,
+    build_asymmetric_2d_unet_model,
     build_single_plane_model,
     build_single_plane_learned_depth_seed_model,
     compile_baseline_model,
@@ -87,6 +90,7 @@ class TrainingConfig:
         "multi_height_3d",
         "single_plane_2d3d",
         "single_plane_2d3d_learned_depth_seed",
+        "single_plane_asymmetric_2d_unet",
     ] = (
         "multi_height_3d"
     )
@@ -157,6 +161,7 @@ class TrainingConfig:
             "multi_height_3d",
             "single_plane_2d3d",
             "single_plane_2d3d_learned_depth_seed",
+            "single_plane_asymmetric_2d_unet",
         }:
             raise ValueError("Unsupported architecture.")
         if self.gravity_loss_weight < 0.0:
@@ -170,11 +175,14 @@ class TrainingConfig:
         if (
             (self.gravity_loss_weight > 0.0 or self.volume_loss_weight > 0.0)
             and self.architecture
-            != "single_plane_2d3d_learned_depth_seed"
+            not in {
+                "single_plane_2d3d_learned_depth_seed",
+                "single_plane_asymmetric_2d_unet",
+            }
         ):
             raise ValueError(
                 "Physics/volume consistency training requires the E06 "
-                "single_plane_2d3d_learned_depth_seed architecture."
+                "learned-depth-seed or E09 asymmetric U-Net architecture."
             )
 
         if self.collapse_threshold < 0.0:
@@ -268,6 +276,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "multi_height_3d",
             "single_plane_2d3d",
             "single_plane_2d3d_learned_depth_seed",
+            "single_plane_asymmetric_2d_unet",
         ),
         default=None,
         help="Additive model/data path. Default preserves multi-height 3D.",
@@ -285,7 +294,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--volume-loss-weight", type=float, default=None,
-        help="Weight for soft occupied-volume-fraction MSE. Default 0 preserves E07.",
+        help="Weight for one-sided excess-volume loss. Default 0 preserves historical runs; corrected E08 uses 0.01.",
     )
     parser.add_argument(
         "--volume-threshold", type=float, default=None,
@@ -666,7 +675,7 @@ def save_training_metadata(
     final_metrics: dict[str, float],
     history: tf.keras.callbacks.History,
     collapse_detection: dict[str, Any],
-    pretraining_loss_scales: dict[str, float] | None = None,
+    pretraining_loss_scales: dict[str, Any] | None = None,
 ) -> None:
     """
     Save training metadata as JSON.
@@ -767,7 +776,7 @@ def save_training_metadata(
         },
         "loss": {
             "name": (
-                "balanced_density_mse_plus_global_normalized_gravity_mse_plus_soft_volume_fraction_mse"
+                "balanced_density_mse_plus_global_normalized_gravity_mse_plus_excess_volume_loss"
                 if config.volume_loss_weight > 0.0
                 else "balanced_density_mse_plus_global_normalized_gravity_mse"
                 if config.gravity_loss_weight > 0.0
@@ -798,17 +807,17 @@ def save_training_metadata(
             "volume_threshold": config.volume_threshold,
             "volume_sigmoid_sharpness": config.volume_sharpness,
             "volume_loss_definition": (
-                "mean_batch((mean_voxels(sigmoid(k*(rho_pred-threshold))) - "
+                "mean_batch(relu(mean_voxels(zero_floor_soft_occ(rho_pred)) - "
                 "mean_voxels(rho_true>0))^2)"
                 if config.volume_loss_weight > 0.0 else None
             ),
             "loss_equation": (
                 "BalancedDensityMSE + gravity_loss_weight * global_normalized_gravity_mse "
-                "+ volume_loss_weight * soft_occupied_fraction_mse"
+                "+ volume_loss_weight * excess_occupied_volume_fraction_loss"
             ),
         },
         "explicit_regularization": (
-            "bidirectional_soft_occupied_volume_fraction_constraint"
+            "one_sided_zero_floor_excess_occupied_volume_constraint"
             if config.volume_loss_weight > 0.0 else None
         ),
         "observational_noise": None,
@@ -839,6 +848,16 @@ def save_training_metadata(
             "24 x 64 x 64 x 1 density output",
         ])
         metadata["dimensional_transformations"] = transformations
+    elif config.architecture == "single_plane_asymmetric_2d_unet":
+        metadata["dimensional_transformations"] = [
+            "81 x 81 x 1 complete surface Gz",
+            "96 x 96 x 1 deterministic zero-padded surface",
+            "96 -> 48 -> 24 -> 12 2D U-Net encoder",
+            "12 -> 24 -> 48 -> 96 2D U-Net decoder with skip connections",
+            "96 x 96 learned valid-convolution transform to 64 x 64",
+            "64 x 64 x 24 directly supervised physical depth channels",
+            "24 x 64 x 64 x 1 deterministic canonical permutation/reshape",
+        ]
 
     with output_path.open(
         "w",
@@ -851,13 +870,70 @@ def save_training_metadata(
         )
 
 
+def run_volume_regime_diagnostics(
+    *, threshold: float, sharpness: float, volume_loss_weight: float
+) -> dict[str, Any]:
+    """Evaluate corrected volume behavior on tiny artificial tensors only."""
+
+    threshold_values = tf.Variable([0.05, 0.10, 0.15], dtype=tf.float32)
+    with tf.GradientTape() as tape:
+        occupancies = soft_occupied_fraction(
+            threshold_values[:, None, None, None, None],
+            threshold=threshold,
+            sharpness=sharpness,
+        )
+    threshold_gradients = tape.gradient(occupancies, threshold_values)
+
+    truth = tf.constant([[[[[1.0], [1.0], [0.0], [0.0]]]]], tf.float32)
+    cases = {
+        "zero": tf.zeros_like(truth),
+        "matching": tf.constant([[[[[1.0], [1.0], [0.0], [0.0]]]]], tf.float32),
+        "excess": tf.constant([[[[[1.0], [1.0], [0.2], [0.0]]]]], tf.float32),
+        "deficit": tf.constant([[[[[1.0], [0.0], [0.0], [0.0]]]]], tf.float32),
+    }
+    results: dict[str, Any] = {
+        "threshold_regime_density_values": threshold_values.numpy().tolist(),
+        "threshold_regime_soft_occupancy": occupancies.numpy().tolist(),
+        "threshold_regime_soft_occupancy_gradients": threshold_gradients.numpy().tolist(),
+        "soft_occupancy_at_zero": float(
+            soft_occupied_fraction(
+                tf.zeros((1, 1, 1, 1, 1), tf.float32),
+                threshold=threshold, sharpness=sharpness,
+            ).numpy()[0]
+        ),
+    }
+    for name, values in cases.items():
+        prediction = tf.Variable(values)
+        with tf.GradientTape() as tape:
+            terms = excess_occupied_volume_fraction_mse(
+                truth, prediction, threshold=threshold, sharpness=sharpness
+            )
+        gradient = tape.gradient(terms[0], prediction)
+        results[f"{name}_excess_volume_loss"] = float(terms[0].numpy())
+        results[f"{name}_weighted_excess_volume_loss"] = float(
+            volume_loss_weight * terms[0].numpy()
+        )
+        results[f"{name}_excess_occupied_fraction"] = float(terms[3].numpy())
+        results[f"{name}_gradient_norm"] = float(tf.linalg.global_norm([gradient]).numpy())
+    excess_prediction = tf.Variable(cases["excess"])
+    with tf.GradientTape() as tape:
+        excess_loss = excess_occupied_volume_fraction_mse(
+            truth, excess_prediction, threshold=threshold, sharpness=sharpness
+        )[0]
+    excess_gradient = tape.gradient(excess_loss, excess_prediction)
+    results["excess_example_gradient_at_extra_voxel"] = float(
+        excess_gradient.numpy()[0, 0, 0, 2, 0]
+    )
+    return results
+
+
 def run_physics_preflight(
     model: PhysicsConsistencyTrainingModel,
     gravity: tf.Tensor,
     density: tf.Tensor,
     *,
     learning_rate: float,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Measure E07/E08 loss and gradient scales without mutating the model."""
 
     variables = model.inversion_model.trainable_variables
@@ -925,21 +1001,28 @@ def run_physics_preflight(
     return {
         "density_loss": float(density_loss.numpy()),
         "gravity_loss": float(gravity_loss.numpy()),
+        "raw_gravity_loss": float(gravity_loss.numpy()),
         "weighted_gravity_loss": float(weighted_gravity_loss.numpy()),
-        "volume_loss": float(volume_loss.numpy()),
-        "weighted_volume_loss": float(weighted_volume_loss.numpy()),
+        "raw_excess_volume_loss": float(volume_loss.numpy()),
+        "weighted_excess_volume_loss": float(weighted_volume_loss.numpy()),
         "total_loss": float(terms[4].numpy()),
         "density_gradient_norm": density_gradient_norm,
         "gravity_gradient_norm": gravity_gradient_norm,
         "weighted_gravity_gradient_norm": weighted_gradient_norm,
-        "volume_gradient_norm": volume_gradient_norm,
-        "weighted_volume_gradient_norm": weighted_volume_gradient_norm,
+        "excess_volume_gradient_norm": volume_gradient_norm,
+        "weighted_excess_volume_gradient_norm": weighted_volume_gradient_norm,
         "weighted_gravity_to_density_gradient_ratio": ratio,
         "weighted_volume_to_density_gradient_ratio": volume_ratio,
         "true_occupied_fraction": float(terms[7].numpy()),
         "predicted_soft_occupied_fraction": float(terms[8].numpy()),
         "soft_volume_fraction_ratio": float(
             tf.math.divide_no_nan(terms[8], terms[7]).numpy()
+        ),
+        "excess_occupied_fraction": float(terms[9].numpy()),
+        "volume_regime_diagnostics": run_volume_regime_diagnostics(
+            threshold=model.volume_threshold,
+            sharpness=model.volume_sharpness,
+            volume_loss_weight=model.volume_loss_weight,
         ),
         "prediction_mean_before": float(tf.reduce_mean(before).numpy()),
         "prediction_mean_after": float(tf.reduce_mean(after).numpy()),
@@ -1012,7 +1095,7 @@ def main() -> None:
         random_seed=config.random_seed,
         gravity_shape=(
             SINGLE_PLANE_GRAVITY_SHAPE
-            if config.architecture.startswith("single_plane_2d3d")
+            if config.architecture.startswith("single_plane")
             else GRAVITY_SHAPE
         ),
     )
@@ -1031,7 +1114,9 @@ def main() -> None:
         ),
     )
 
-    if config.architecture == "single_plane_2d3d_learned_depth_seed":
+    if config.architecture == "single_plane_asymmetric_2d_unet":
+        model = build_asymmetric_2d_unet_model(model_config)
+    elif config.architecture == "single_plane_2d3d_learned_depth_seed":
         model = build_single_plane_learned_depth_seed_model(model_config)
     elif config.architecture == "single_plane_2d3d":
         model = build_single_plane_model(model_config)
@@ -1041,7 +1126,7 @@ def main() -> None:
     physics_training = (
         config.gravity_loss_weight > 0.0 or config.volume_loss_weight > 0.0
     )
-    pretraining_loss_scales: dict[str, float] | None = None
+    pretraining_loss_scales: dict[str, Any] | None = None
     if physics_training:
         model = PhysicsConsistencyTrainingModel(
             inversion_model,

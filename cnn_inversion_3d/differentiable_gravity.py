@@ -131,30 +131,39 @@ def soft_occupied_fraction(
     """Return each sample's differentiable occupied-volume fraction.
 
     Density is expected to have shape ``(batch,z,y,x,channels)``.  A
-    sharpness of 60 keeps the zero-density occupancy floor near 0.0025 while
-    retaining strong gradients around the project's 0.1 g/cm^3 threshold.
+    The raw sigmoid floor is subtracted and renormalized, making occupancy
+    exactly zero at zero density while retaining strong threshold gradients.
     """
 
     values = tf.convert_to_tensor(density)
-    occupancy = tf.sigmoid(
+    raw = tf.sigmoid(
         tf.cast(sharpness, values.dtype)
         * (values - tf.cast(threshold, values.dtype))
+    )
+    floor = tf.sigmoid(
+        -tf.cast(sharpness, values.dtype)
+        * tf.cast(threshold, values.dtype)
+    )
+    occupancy = tf.clip_by_value(
+        (raw - floor) / (tf.cast(1.0, values.dtype) - floor), 0.0, 1.0
     )
     return tf.reduce_mean(occupancy, axis=tf.range(1, tf.rank(occupancy)))
 
 
-def occupied_volume_fraction_mse(
+def excess_occupied_volume_fraction_mse(
     true_density: tf.Tensor,
     predicted_density: tf.Tensor,
     *,
     threshold: float = 0.1,
     sharpness: float = 60.0,
 ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-    """Return batch MSE between true and predicted occupied fractions.
+    """Return one-sided excess occupied-volume loss.
 
     Truth uses the known binary support (strictly positive density), while the
     prediction uses :func:`soft_occupied_fraction`.  The returned values are
-    ``(loss, true_fraction_mean, predicted_soft_fraction_mean)``.
+    ``(loss, true_fraction_mean, predicted_soft_fraction_mean,
+    excess_fraction_mean)``. Predictions with deficient support receive zero
+    volume penalty; the balanced density loss remains responsible for recall.
     """
 
     prediction_fraction = soft_occupied_fraction(
@@ -162,8 +171,32 @@ def occupied_volume_fraction_mse(
     )
     truth = tf.cast(true_density > 0.0, predicted_density.dtype)
     truth_fraction = tf.reduce_mean(truth, axis=tf.range(1, tf.rank(truth)))
-    loss = tf.reduce_mean(tf.square(prediction_fraction - truth_fraction))
-    return loss, tf.reduce_mean(truth_fraction), tf.reduce_mean(prediction_fraction)
+    excess_fraction = tf.nn.relu(prediction_fraction - truth_fraction)
+    loss = tf.reduce_mean(tf.square(excess_fraction))
+    return (
+        loss,
+        tf.reduce_mean(truth_fraction),
+        tf.reduce_mean(prediction_fraction),
+        tf.reduce_mean(excess_fraction),
+    )
+
+
+def combine_density_gravity_volume_losses(
+    density_loss: tf.Tensor,
+    gravity_loss: tf.Tensor,
+    excess_volume_loss: tf.Tensor,
+    *,
+    gravity_loss_weight: float,
+    volume_loss_weight: float,
+) -> tf.Tensor:
+    """Combine E07/E08 terms; a zero volume weight exactly recovers E07."""
+
+    dtype = density_loss.dtype
+    return (
+        density_loss
+        + tf.cast(gravity_loss_weight, dtype) * tf.cast(gravity_loss, dtype)
+        + tf.cast(volume_loss_weight, dtype) * tf.cast(excess_volume_loss, dtype)
+    )
 
 
 class PhysicsConsistencyTrainingModel(tf.keras.Model):
@@ -200,14 +233,17 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         self.weighted_gravity_tracker = tf.keras.metrics.Mean(
             name="weighted_gravity_loss"
         )
-        self.volume_loss_tracker = tf.keras.metrics.Mean(name="volume_fraction_mse")
-        self.weighted_volume_tracker = tf.keras.metrics.Mean(name="weighted_volume_loss")
+        self.volume_loss_tracker = tf.keras.metrics.Mean(name="excess_volume_loss")
+        self.weighted_volume_tracker = tf.keras.metrics.Mean(name="weighted_excess_volume_loss")
         self.true_occupied_fraction_tracker = tf.keras.metrics.Mean(name="true_occupied_fraction")
         self.predicted_occupied_fraction_tracker = tf.keras.metrics.Mean(
             name="predicted_soft_occupied_fraction"
         )
         self.volume_fraction_ratio_tracker = tf.keras.metrics.Mean(
             name="soft_volume_fraction_ratio"
+        )
+        self.excess_occupied_fraction_tracker = tf.keras.metrics.Mean(
+            name="excess_occupied_fraction"
         )
         self.gravity_rmse_tracker = tf.keras.metrics.Mean(name="gravity_rmse")
         self.gravity_correlation_tracker = tf.keras.metrics.Mean(
@@ -229,6 +265,7 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
             self.true_occupied_fraction_tracker,
             self.predicted_occupied_fraction_tracker,
             self.volume_fraction_ratio_tracker,
+            self.excess_occupied_fraction_tracker,
             self.gravity_rmse_tracker,
             self.gravity_correlation_tracker,
             *self.density_diagnostics,
@@ -264,14 +301,22 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
             gravity_scale=self.gravity_scale,
         )
         weighted_gravity = self.gravity_loss_weight * gravity_loss
-        volume_loss, true_fraction, predicted_fraction = occupied_volume_fraction_mse(
+        volume_loss, true_fraction, predicted_fraction, excess_fraction = (
+            excess_occupied_volume_fraction_mse(
             true_density,
             predicted_density,
             threshold=self.volume_threshold,
             sharpness=self.volume_sharpness,
+            )
         )
         weighted_volume = self.volume_loss_weight * volume_loss
-        total_loss = density_loss + weighted_gravity + weighted_volume
+        total_loss = combine_density_gravity_volume_losses(
+            density_loss,
+            gravity_loss,
+            volume_loss,
+            gravity_loss_weight=self.gravity_loss_weight,
+            volume_loss_weight=self.volume_loss_weight,
+        )
         return (
             predicted_density,
             density_loss,
@@ -282,6 +327,7 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
             weighted_volume,
             true_fraction,
             predicted_fraction,
+            excess_fraction,
         )
 
     def _update_metrics(
@@ -294,6 +340,7 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
 
         prediction, density_loss, gravity_loss, weighted, total = terms[:5]
         volume_loss, weighted_volume, true_fraction, predicted_fraction = terms[5:9]
+        excess_fraction = terms[9]
         true_gravity = tf.cast(gravity_normalized * self.gravity_scale, tf.float32)
         predicted_gravity = self.forward_operator(prediction)
         residual = predicted_gravity - true_gravity
@@ -308,6 +355,7 @@ class PhysicsConsistencyTrainingModel(tf.keras.Model):
         self.volume_fraction_ratio_tracker.update_state(
             tf.math.divide_no_nan(predicted_fraction, true_fraction)
         )
+        self.excess_occupied_fraction_tracker.update_state(excess_fraction)
         self.gravity_rmse_tracker.update_state(tf.sqrt(tf.reduce_mean(residual**2)))
         true_flat = tf.reshape(true_gravity, (tf.shape(true_gravity)[0], -1))
         pred_flat = tf.reshape(predicted_gravity, (tf.shape(predicted_gravity)[0], -1))

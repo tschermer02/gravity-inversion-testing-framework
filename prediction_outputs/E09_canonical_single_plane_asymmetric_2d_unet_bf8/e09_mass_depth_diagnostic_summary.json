@@ -1,0 +1,10 @@
+{
+  "number_of_samples": 100,
+  "occupancy_threshold": 0.1,
+  "mass_proxy_definition": "sum of density values over all voxels",
+  "occupied_depth_extent_definition": "number of z slices containing at least one voxel at or above threshold",
+  "mean_mass_ratio": 4.098543295453004,
+  "median_mass_ratio": 3.6804572809311766,
+  "mean_depth_extent_ratio": 3.221785714285715,
+  "median_depth_extent_ratio": 2.8
+}

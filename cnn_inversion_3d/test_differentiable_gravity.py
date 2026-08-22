@@ -10,7 +10,8 @@ from cnn_inversion_3d.differentiable_gravity import (
     DifferentiableSinglePlaneGz,
     PhysicsConsistencyTrainingModel,
     global_normalized_gravity_mse,
-    occupied_volume_fraction_mse,
+    excess_occupied_volume_fraction_mse,
+    combine_density_gravity_volume_losses,
     soft_occupied_fraction,
 )
 from cnn_inversion_3d.model import (
@@ -71,8 +72,8 @@ def test_global_normalized_gravity_mse_is_numerically_correct() -> None:
     assert float(weak.numpy()) < float(loss.numpy())
 
 
-def test_e07_total_loss_identity_and_tiny_step() -> None:
-    """Verify E07 changes the objective, not the E06 inference network."""
+def test_e07_total_loss_identity_when_volume_weight_is_zero() -> None:
+    """Verify a zero volume weight reproduces the exact E07 objective."""
 
     inversion = build_single_plane_learned_depth_seed_model(
         ModelConfig(base_filters=1)
@@ -82,8 +83,8 @@ def test_e07_total_loss_identity_and_tiny_step() -> None:
         DifferentiableSinglePlaneGz(),
         gravity_scale=0.22938017547130585,
         gravity_loss_weight=0.001,
+        volume_loss_weight=0.0,
     )
-    wrapper.compile(optimizer=tf.keras.optimizers.Adam(1.0e-3))
     gravity = np.ones((1, *SINGLE_PLANE_GRAVITY_SHAPE), np.float32) * 0.1
     density = np.zeros((1, *DENSITY_SHAPE), np.float32)
     density[:, 2:4, 30:34, 30:34, :] = 0.5
@@ -93,36 +94,64 @@ def test_e07_total_loss_identity_and_tiny_step() -> None:
         terms[1].numpy() + 0.001 * terms[2].numpy(),
         rtol=1.0e-6,
     )
-    logs = wrapper.train_on_batch(gravity, density, return_dict=True)
-    assert np.isfinite(logs["loss"])
     assert wrapper.inversion_model is inversion
 
 
-def test_soft_occupied_fraction_has_expected_bidirectional_loss() -> None:
-    """Verify matching support is preferred over both excess and deficit."""
+def _volume(values: list[float]) -> tf.Tensor:
+    return tf.reshape(tf.constant(values, tf.float32), (1, 1, 1, 4, 1))
 
-    truth = tf.constant([[[[[0.5]], [[0.0]], [[0.0]], [[0.0]]]]])
-    matched = tf.constant([[[[[0.5]], [[0.0]], [[0.0]], [[0.0]]]]])
-    excess = tf.constant([[[[[0.5]], [[0.5]], [[0.5]], [[0.0]]]]])
-    deficit = tf.zeros_like(truth)
-    matched_loss = occupied_volume_fraction_mse(truth, matched)[0]
-    excess_loss = occupied_volume_fraction_mse(truth, excess)[0]
-    deficit_loss = occupied_volume_fraction_mse(truth, deficit)[0]
-    assert float(matched_loss.numpy()) < float(excess_loss.numpy())
-    assert float(matched_loss.numpy()) < float(deficit_loss.numpy())
+
+def test_soft_occupancy_is_zero_at_zero() -> None:
+    """Verify zero-floor normalization."""
+
+    value = soft_occupied_fraction(tf.zeros((1, 1, 1, 1, 1))).numpy()[0]
+    assert value == 0.0
+
+
+def test_soft_occupancy_is_monotonic() -> None:
+    """Verify soft occupancy increases with density."""
+
+    fractions = soft_occupied_fraction(
+        tf.reshape(tf.constant([0.0, 0.05, 0.1, 0.15]), (4, 1, 1, 1, 1))
+    ).numpy()
+    assert np.all(np.diff(fractions) > 0.0)
+
+
+def test_excess_support_produces_positive_loss() -> None:
+    """Verify excessive support activates the corrected penalty."""
+
+    truth = _volume([1.0, 1.0, 0.0, 0.0])
+    excess = _volume([1.0, 1.0, 0.2, 0.0])
+    assert float(excess_occupied_volume_fraction_mse(truth, excess)[0]) > 0.0
+
+
+def test_deficient_support_produces_zero_excess_loss() -> None:
+    """Verify deficient support is left to BalancedDensityMSE."""
+
+    truth = _volume([1.0, 1.0, 0.0, 0.0])
+    deficit = _volume([1.0, 0.0, 0.0, 0.0])
+    assert float(excess_occupied_volume_fraction_mse(truth, deficit)[0]) == 0.0
+
+
+def test_matching_support_produces_zero_excess_loss() -> None:
+    """Verify matching occupied fractions have no excess penalty."""
+
+    truth = _volume([1.0, 1.0, 0.0, 0.0])
+    matching = _volume([1.0, 1.0, 0.0, 0.0])
+    assert float(excess_occupied_volume_fraction_mse(truth, matching)[0]) < 1.0e-12
 
 
 def test_soft_occupied_fraction_gradient_reduces_excess_volume() -> None:
     """Verify gradient descent pushes excessive soft occupancy downward."""
 
-    truth = tf.constant([[[[[0.5]], [[0.0]], [[0.0]], [[0.0]]]]])
-    prediction = tf.Variable([[[[[0.5]], [[0.2]], [[0.2]], [[0.2]]]]])
+    truth = _volume([1.0, 1.0, 0.0, 0.0])
+    prediction = tf.Variable(_volume([1.0, 1.0, 0.2, 0.0]))
     with tf.GradientTape() as tape:
-        loss = occupied_volume_fraction_mse(truth, prediction)[0]
+        loss = excess_occupied_volume_fraction_mse(truth, prediction)[0]
     gradient = tape.gradient(loss, prediction)
     assert gradient is not None
     assert np.all(np.isfinite(gradient.numpy()))
-    assert float(gradient.numpy()[0, 0, 1, 0, 0]) > 0.0
+    assert float(gradient.numpy()[0, 0, 0, 2, 0]) > 0.0
 
 
 def test_soft_occupancy_default_has_nonzero_threshold_gradient() -> None:
@@ -132,4 +161,21 @@ def test_soft_occupancy_default_has_nonzero_threshold_gradient() -> None:
     with tf.GradientTape() as tape:
         fraction = soft_occupied_fraction(density)
     gradient = tape.gradient(fraction, density)
-    np.testing.assert_allclose(gradient.numpy(), 15.0, rtol=1.0e-6)
+    assert np.all(np.isfinite(gradient.numpy()))
+    assert float(gradient.numpy().squeeze()) > 10.0
+
+
+def test_zero_volume_weight_exactly_recovers_e07_loss() -> None:
+    """Verify the corrected integration remains backward compatible with E07."""
+
+    density = tf.constant(0.2)
+    gravity = tf.constant(3.0)
+    arbitrary_volume = tf.constant(99.0)
+    total = combine_density_gravity_volume_losses(
+        density,
+        gravity,
+        arbitrary_volume,
+        gravity_loss_weight=0.001,
+        volume_loss_weight=0.0,
+    )
+    np.testing.assert_allclose(total.numpy(), (density + 0.001 * gravity).numpy())

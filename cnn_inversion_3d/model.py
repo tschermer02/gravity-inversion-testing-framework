@@ -392,6 +392,96 @@ def build_single_plane_learned_depth_seed_model(
     )
 
 
+def build_asymmetric_2d_unet_model(
+    config: ModelConfig | None = None,
+) -> tf.keras.Model:
+    """Build E09: padded 2D U-Net with 24 directly supervised depth channels.
+
+    The full 81 x 81 observation plane is zero-padded to 96 x 96 before any
+    feature extraction.  A standard three-level 2D U-Net operates at that
+    resolution.  A learned valid convolution maps the decoded 96 x 96 feature
+    grid to 64 x 64, and a final 2D projection predicts the 24 physical depth
+    slices directly.  Only deterministic permutation and channel expansion
+    convert ``(64,64,24)`` to canonical ``(24,64,64,1)``.
+    """
+
+    if config is None:
+        config = ModelConfig()
+    config.validate()
+    filters = config.base_filters
+    inputs = tf.keras.Input(
+        shape=SINGLE_PLANE_GRAVITY_SHAPE,
+        name="e09_surface_gravity_gz",
+    )
+    padded = tf.keras.layers.ZeroPadding2D(
+        padding=((7, 8), (7, 8)),
+        name="e09_pad_complete_81_to_96",
+    )(inputs)
+
+    encoder_1 = _convolution_2d_block(
+        padded, filters=filters, name="e09_encoder_1"
+    )
+    pooled_1 = tf.keras.layers.MaxPool2D(2, name="e09_pool_96_to_48")(encoder_1)
+    encoder_2 = _convolution_2d_block(
+        pooled_1, filters=filters * 2, name="e09_encoder_2"
+    )
+    pooled_2 = tf.keras.layers.MaxPool2D(2, name="e09_pool_48_to_24")(encoder_2)
+    encoder_3 = _convolution_2d_block(
+        pooled_2, filters=filters * 4, name="e09_encoder_3"
+    )
+    pooled_3 = tf.keras.layers.MaxPool2D(2, name="e09_pool_24_to_12")(encoder_3)
+    bottleneck = _convolution_2d_block(
+        pooled_3, filters=filters * 8, name="e09_bottleneck"
+    )
+
+    decoded = bottleneck
+    for index, (skip, output_filters, size) in enumerate(
+        ((encoder_3, filters * 4, 24), (encoder_2, filters * 2, 48), (encoder_1, filters, 96)),
+        start=1,
+    ):
+        decoded = tf.keras.layers.Conv2DTranspose(
+            output_filters,
+            kernel_size=2,
+            strides=2,
+            padding="same",
+            activation="relu",
+            kernel_initializer="he_normal",
+            name=f"e09_upsample_to_{size}",
+        )(decoded)
+        decoded = tf.keras.layers.Concatenate(
+            name=f"e09_skip_connection_{index}"
+        )([decoded, skip])
+        decoded = _convolution_2d_block(
+            decoded, filters=output_filters, name=f"e09_decoder_{index}"
+        )
+
+    lateral_64 = tf.keras.layers.Conv2D(
+        filters,
+        kernel_size=33,
+        padding="valid",
+        activation="relu",
+        kernel_initializer="he_normal",
+        name="e09_learned_spatial_transform_96_to_64",
+    )(decoded)
+    depth_channels = tf.keras.layers.Conv2D(
+        24,
+        kernel_size=1,
+        padding="same",
+        activation=config.output_activation,
+        name="e09_density_depth_channels",
+    )(lateral_64)
+    depth_first = tf.keras.layers.Permute(
+        (3, 1, 2), name="e09_permute_depth_channels_first"
+    )(depth_channels)
+    outputs = tf.keras.layers.Reshape(
+        DENSITY_SHAPE, name="recovered_density"
+    )(depth_first)
+    model = tf.keras.Model(inputs, outputs, name="e09_asymmetric_2d_unet")
+    if model.output_shape != (None, *DENSITY_SHAPE):
+        raise RuntimeError(f"Unexpected E09 output shape: {model.output_shape}")
+    return model
+
+
 def _build_single_plane_model(
     *,
     config: ModelConfig | None,
