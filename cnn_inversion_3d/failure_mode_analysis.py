@@ -156,6 +156,13 @@ def collect(root: Path, dataset: Path) -> tuple[list[dict[str, Any]], dict[str, 
             predicted_sum = float(existing_diagnostic.get("predicted_density_sum", np.sum(prediction)))
             true_mask = truth >= THRESHOLD
             squared_error = np.square(prediction - truth)
+            true_profile = np.sum(truth, axis=(1, 2))
+            predicted_profile = np.sum(prediction, axis=(1, 2))
+            true_profile_normalized = true_profile / max(float(np.sum(true_profile)), 1.0e-8)
+            predicted_profile_normalized = predicted_profile / max(float(np.sum(predicted_profile)), 1.0e-8)
+            depth_coordinates = 5.0 + np.arange(24, dtype=float) * CELL_M
+            true_z_center = float(np.sum(depth_coordinates * true_profile) / max(float(np.sum(true_profile)), 1.0e-8))
+            predicted_z_center = float(np.sum(depth_coordinates * predicted_profile) / max(float(np.sum(predicted_profile)), 1.0e-8))
             gravity = gravity_maps[label].get(sid, {})
             row: dict[str, Any] = {
                 "experiment": label, "sample_id": sid,
@@ -172,6 +179,9 @@ def collect(root: Path, dataset: Path) -> tuple[list[dict[str, Any]], dict[str, 
                 "peak_predicted_density": float(np.max(prediction)),
                 "body_mse": float(np.mean(squared_error[true_mask])),
                 "background_mse": float(np.mean(squared_error[~true_mask])),
+                "depth_profile_mse": float(np.mean(np.square(predicted_profile_normalized - true_profile_normalized))),
+                "z_center_error_m": predicted_z_center - true_z_center,
+                "absolute_z_center_error_m": abs(predicted_z_center - true_z_center),
                 "true_top_depth_m": truth_geometry["top_depth_m"],
                 "true_bottom_depth_m": truth_geometry["bottom_depth_m"],
                 "true_thickness_m": truth_geometry["thickness_m"],
@@ -209,7 +219,8 @@ def collect(root: Path, dataset: Path) -> tuple[list[dict[str, Any]], dict[str, 
 
 
 AGGREGATES = (
-    "mse", "mae", "iou", "dice", "body_mse", "background_mse", "volume_ratio", "mass_ratio",
+    "mse", "mae", "iou", "dice", "body_mse", "background_mse", "depth_profile_mse",
+    "absolute_z_center_error_m", "volume_ratio", "mass_ratio",
     "absolute_top_depth_error_m", "absolute_bottom_depth_error_m",
     "absolute_thickness_error_m", "absolute_width_x_error_m", "absolute_width_y_error_m",
     "lateral_center_error_m", "gravity_rmse", "gravity_correlation", "gravity_relative_l2",
