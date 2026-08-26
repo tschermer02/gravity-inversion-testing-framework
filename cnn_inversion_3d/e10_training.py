@@ -22,12 +22,35 @@ class E10LossConfig:
 
     lambda_shape: float = 1.0
     lambda_sensitivity: float = 1.0
-    lambda_physics: float = 1.0e-3
-    sensitivity_gamma: float = 0.5
+    lambda_physics: float = 1.0e-4
+    sensitivity_gamma: float = 0.25
     occupancy_threshold: float = 0.1
-    occupancy_sharpness: float = 60.0
+    occupancy_sharpness: float = 10.0
     epsilon: float = 1.0e-8
     body_fraction: float = 0.5
+
+    @property
+    def sensitivity_enabled(self) -> bool:
+        """Whether inverse-sensitivity weighting changes the density loss."""
+
+        return self.sensitivity_gamma > 0.0
+
+    @classmethod
+    def for_ablation(cls, ablation: str, *, body_fraction: float = 0.5) -> "E10LossConfig":
+        """Return the controlled E10A/B/C loss configuration."""
+
+        normalized = ablation.upper()
+        if normalized not in {"A", "B", "C"}:
+            raise ValueError("E10 ablation must be A, B, or C.")
+        return cls(
+            lambda_shape=1.0,
+            lambda_sensitivity=1.0,
+            lambda_physics=1.0e-4 if normalized == "C" else 0.0,
+            sensitivity_gamma=0.0 if normalized == "A" else 0.25,
+            occupancy_threshold=0.1,
+            occupancy_sharpness=10.0,
+            body_fraction=body_fraction,
+        )
 
     def validate(self) -> None:
         """Validate E10 loss parameters."""

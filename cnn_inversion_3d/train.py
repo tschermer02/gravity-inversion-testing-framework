@@ -107,10 +107,11 @@ class TrainingConfig:
     volume_sharpness: float = 60.0
     e10_lambda_shape: float = 1.0
     e10_lambda_sensitivity: float = 1.0
-    e10_lambda_physics: float = 1.0e-3
-    e10_sensitivity_gamma: float = 0.5
+    e10_lambda_physics: float = 1.0e-4
+    e10_sensitivity_gamma: float = 0.25
     e10_occupancy_threshold: float = 0.1
-    e10_occupancy_sharpness: float = 60.0
+    e10_occupancy_sharpness: float = 10.0
+    e10_ablation: Literal["A", "B", "C"] | None = None
 
     collapse_threshold: float = 1.0e-5
     collapse_patience: int = 2
@@ -219,6 +220,8 @@ class TrainingConfig:
                 occupancy_sharpness=self.e10_occupancy_sharpness,
                 body_fraction=self.body_loss_fraction,
             ).validate()
+        elif self.e10_ablation is not None:
+            raise ValueError("--e10-ablation requires the E10 architecture.")
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -336,6 +339,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--e10-sensitivity-gamma", type=float, default=None)
     parser.add_argument("--e10-occupancy-threshold", type=float, default=None)
     parser.add_argument("--e10-occupancy-sharpness", type=float, default=None)
+    parser.add_argument(
+        "--e10-ablation", choices=("A", "B", "C"), default=None,
+        help="Controlled E10 loss preset; architecture is identical for A/B/C.",
+    )
 
     parser.add_argument(
         "--vertical-expansion",
@@ -476,6 +483,17 @@ def apply_arguments(
         values["volume_threshold"] = arguments.volume_threshold
     if arguments.volume_sharpness is not None:
         values["volume_sharpness"] = arguments.volume_sharpness
+    if arguments.e10_ablation is not None:
+        values["e10_ablation"] = arguments.e10_ablation
+        preset = E10LossConfig.for_ablation(arguments.e10_ablation)
+        values.update({
+            "e10_lambda_shape": preset.lambda_shape,
+            "e10_lambda_sensitivity": preset.lambda_sensitivity,
+            "e10_lambda_physics": preset.lambda_physics,
+            "e10_sensitivity_gamma": preset.sensitivity_gamma,
+            "e10_occupancy_threshold": preset.occupancy_threshold,
+            "e10_occupancy_sharpness": preset.occupancy_sharpness,
+        })
     for argument_name, config_name in (
         ("e10_lambda_shape", "e10_lambda_shape"),
         ("e10_lambda_sensitivity", "e10_lambda_sensitivity"),
@@ -871,6 +889,7 @@ def save_training_metadata(
             ),
             "e10": (
                 {
+                    "ablation": config.e10_ablation,
                     "lambda_shape": config.e10_lambda_shape,
                     "lambda_sensitivity": config.e10_lambda_sensitivity,
                     "lambda_physics": config.e10_lambda_physics,
@@ -939,9 +958,12 @@ def save_training_metadata(
             "16 x 16 x 64 bottleneck",
             "32 x 32 x 32 decoder features with skip",
             "64 x 64 x 16 decoder features with skip",
-            "64 x 64 x 8 final 2D features",
+            "128 x 128 x 8 decoder features with highest-resolution skip",
+            "64 x 64 x 8 learned stride-two spatial projection",
             "64 x 64 x 24 directly supervised physical depth channels",
-            "24 x 64 x 64 x 1 deterministic canonical permutation/reshape",
+            "24 x 64 x 64 x 1 initial canonical density volume",
+            "two 3 x 3 x 3 Conv3D layers and residual 1 x 1 x 1 correction",
+            "24 x 64 x 64 x 1 bounded refined density output",
         ]
 
     with output_path.open(
@@ -1137,6 +1159,12 @@ def run_e10_preflight(
         return float(tf.linalg.global_norm(values).numpy())
 
     gradient_norms = {f"{name}_gradient_norm": norm(loss) for name, loss in losses.items()}
+    cfg = model.loss_config
+    weighted_gradient_norms = {
+        "weighted_shape_gradient_norm": cfg.lambda_shape * gradient_norms["iou_gradient_norm"],
+        "weighted_density_gradient_norm": cfg.lambda_sensitivity * gradient_norms["sensitivity_gradient_norm"],
+        "weighted_physics_gradient_norm": cfg.lambda_physics * gradient_norms["gravity_gradient_norm"],
+    }
     del tape
     prediction = terms[0]
     expected_input = (gravity.shape[0], 81, 81, 1)
@@ -1146,7 +1174,7 @@ def run_e10_preflight(
     if tuple(prediction.shape) != expected_density:
         raise ValueError(f"E10 density shape mismatch: {prediction.shape}")
     values = [float(loss.numpy()) for loss in losses.values()]
-    if not np.all(np.isfinite(values + list(gradient_norms.values()))):
+    if not np.all(np.isfinite(values + list(gradient_norms.values()) + list(weighted_gradient_norms.values()))):
         raise ValueError("E10 preflight contains nonfinite losses or gradients.")
     return {
         "input_gravity_shape": list(gravity.shape),
@@ -1158,7 +1186,13 @@ def run_e10_preflight(
         "gravity_loss": float(losses["gravity"].numpy()),
         "total_loss": float(losses["total"].numpy()),
         **gradient_norms,
-        "all_terms_differentiable": all(value > 0.0 for value in gradient_norms.values()),
+        **weighted_gradient_norms,
+        "sensitivity_balancing_enabled": cfg.sensitivity_enabled,
+        "physics_contribution_enabled": cfg.lambda_physics > 0.0,
+        "all_terms_differentiable": all(
+            gradient_norms[f"{name}_gradient_norm"] > 0.0
+            for name in ("iou", "sensitivity", "gravity")
+        ),
         "density_order": "batch,z,y,x,channel",
         "gravity_order": "batch,y,x,channel",
     }
@@ -1343,6 +1377,17 @@ def main() -> None:
         pretraining_loss_scales = run_e10_preflight(
             model, sample_gravity, sample_density
         )
+        print("E10 raw gradient norms:", {
+            name: pretraining_loss_scales[name] for name in (
+                "iou_gradient_norm", "sensitivity_gradient_norm", "gravity_gradient_norm"
+            )
+        })
+        print("E10 weighted gradient norms:", {
+            name: pretraining_loss_scales[name] for name in (
+                "weighted_shape_gradient_norm", "weighted_density_gradient_norm",
+                "weighted_physics_gradient_norm"
+            )
+        })
         (output_directory / "e10_pretraining_diagnostics.json").write_text(
             json.dumps(pretraining_loss_scales, indent=2), encoding="utf-8"
         )
@@ -1635,6 +1680,7 @@ def main() -> None:
         e10_sensitivity_gamma=config.e10_sensitivity_gamma,
         e10_occupancy_threshold=config.e10_occupancy_threshold,
         e10_occupancy_sharpness=config.e10_occupancy_sharpness,
+        e10_ablation=config.e10_ablation,
         collapse_threshold=(
             config.collapse_threshold
         ),

@@ -155,6 +155,7 @@ def collect(root: Path, dataset: Path) -> tuple[list[dict[str, Any]], dict[str, 
             true_sum = float(existing_diagnostic.get("true_density_sum", np.sum(truth)))
             predicted_sum = float(existing_diagnostic.get("predicted_density_sum", np.sum(prediction)))
             true_mask = truth >= THRESHOLD
+            squared_error = np.square(prediction - truth)
             gravity = gravity_maps[label].get(sid, {})
             row: dict[str, Any] = {
                 "experiment": label, "sample_id": sid,
@@ -169,6 +170,8 @@ def collect(root: Path, dataset: Path) -> tuple[list[dict[str, Any]], dict[str, 
                 "true_body_mean_density": float(np.mean(truth[true_mask])),
                 "predicted_mean_density_in_true_body": float(np.mean(prediction[true_mask])),
                 "peak_predicted_density": float(np.max(prediction)),
+                "body_mse": float(np.mean(squared_error[true_mask])),
+                "background_mse": float(np.mean(squared_error[~true_mask])),
                 "true_top_depth_m": truth_geometry["top_depth_m"],
                 "true_bottom_depth_m": truth_geometry["bottom_depth_m"],
                 "true_thickness_m": truth_geometry["thickness_m"],
@@ -206,7 +209,7 @@ def collect(root: Path, dataset: Path) -> tuple[list[dict[str, Any]], dict[str, 
 
 
 AGGREGATES = (
-    "mse", "mae", "iou", "dice", "volume_ratio", "mass_ratio",
+    "mse", "mae", "iou", "dice", "body_mse", "background_mse", "volume_ratio", "mass_ratio",
     "absolute_top_depth_error_m", "absolute_bottom_depth_error_m",
     "absolute_thickness_error_m", "absolute_width_x_error_m", "absolute_width_y_error_m",
     "lateral_center_error_m", "gravity_rmse", "gravity_correlation", "gravity_relative_l2",

@@ -22,7 +22,7 @@ from cnn_inversion_3d.model import ModelConfig, build_e10_sensitivity_unet_model
 from cnn_inversion_3d.single_plane_review import SinglePlaneReviewConfig
 
 
-def test_e10_shape_progression_padding_and_no_3d_convolutions() -> None:
+def test_e10_shape_progression_skip_projection_and_3d_refinement() -> None:
     model = build_e10_sensitivity_unet_model(ModelConfig(base_filters=1))
     expected = {
         "e10_pad_complete_81_to_128": (None, 128, 128, 1),
@@ -32,19 +32,57 @@ def test_e10_shape_progression_padding_and_no_3d_convolutions() -> None:
         "e10_bottleneck_16_conv_2": (None, 16, 16, 8),
         "e10_decoder_32_conv_2": (None, 32, 32, 4),
         "e10_decoder_64_conv_2": (None, 64, 64, 2),
-        "e10_final_64_features_conv_2": (None, 64, 64, 1),
+        "e10_decoder_128_conv_2": (None, 128, 128, 1),
+        "e10_learned_projection_128_to_64": (None, 64, 64, 1),
+        "e10_projected_64_features_conv_2": (None, 64, 64, 1),
         "e10_density_depth_channels": (None, 64, 64, 24),
         "e10_permute_depth_channels_first": (None, 24, 64, 64),
+        "e10_initial_density_volume": (None, 24, 64, 64, 1),
+        "e10_refine_3d_conv_1": (None, 24, 64, 64, 8),
+        "e10_refine_3d_conv_2": (None, 24, 64, 64, 8),
+        "e10_recovered_density": (None, 24, 64, 64, 1),
     }
     for name, shape in expected.items():
         assert tuple(model.get_layer(name).output.shape) == shape
     assert model.output_shape == (None, *DENSITY_SHAPE)
-    assert not any(isinstance(layer, (tf.keras.layers.Conv3D, tf.keras.layers.Conv3DTranspose)) for layer in model.layers)
+    skip = model.get_layer("e10_skip_128")
+    assert any(
+        tensor is model.get_layer("e10_encoder_128_conv_2").output
+        for tensor in skip.input
+    )
+    assert sum(isinstance(layer, tf.keras.layers.Conv3D) for layer in model.layers) == 3
 
     pad_model = tf.keras.Model(model.input, model.get_layer("e10_pad_complete_81_to_128").output)
     values = np.arange(81 * 81, dtype=np.float32).reshape(1, 81, 81, 1)
     padded = pad_model(values).numpy()
     np.testing.assert_array_equal(padded[:, 23:104, 23:104, :], values)
+
+    with tf.GradientTape() as tape:
+        output = model(tf.zeros((1, *SINGLE_PLANE_GRAVITY_SHAPE)), training=True)
+        loss = tf.reduce_sum(output)
+    gradients = tape.gradient(loss, model.trainable_variables)
+    gradient_by_id = {
+        id(variable): gradient
+        for variable, gradient in zip(model.trainable_variables, gradients)
+    }
+    for layer_name in (
+        "e10_learned_projection_128_to_64",
+        "e10_refine_3d_conv_1",
+    ):
+        assert all(
+            gradient_by_id[id(variable)] is not None
+            for variable in model.get_layer(layer_name).trainable_variables
+        )
+
+
+def test_e10_ablation_presets_change_only_losses() -> None:
+    a = E10LossConfig.for_ablation("A")
+    b = E10LossConfig.for_ablation("B")
+    c = E10LossConfig.for_ablation("C")
+    assert (a.lambda_shape, a.lambda_sensitivity, a.lambda_physics, a.sensitivity_gamma) == (1.0, 1.0, 0.0, 0.0)
+    assert (b.lambda_shape, b.lambda_sensitivity, b.lambda_physics, b.sensitivity_gamma) == (1.0, 1.0, 0.0, 0.25)
+    assert (c.lambda_shape, c.lambda_sensitivity, c.lambda_physics, c.sensitivity_gamma) == (1.0, 1.0, 1.0e-4, 0.25)
+    assert {a.occupancy_sharpness, b.occupancy_sharpness, c.occupancy_sharpness} == {10.0}
 
 
 def test_e10_weights_are_finite_mean_one_and_match_kernel_ordering() -> None:
@@ -87,6 +125,16 @@ def test_e10_three_terms_are_finite_and_differentiable() -> None:
     assert tape.gradient(sensitivity, prediction) is not None
     assert tape.gradient(gravity, predicted_gravity) is not None
     assert np.all(np.isfinite([iou.numpy(), sensitivity.numpy(), gravity.numpy()]))
+
+
+def test_e10_model_serializes_with_canonical_output(tmp_path) -> None:
+    model = build_e10_sensitivity_unet_model(ModelConfig(base_filters=1))
+    path = tmp_path / "e10.keras"
+    model.save(path)
+    loaded = tf.keras.models.load_model(path, compile=False)
+    assert loaded.input_shape == (None, *SINGLE_PLANE_GRAVITY_SHAPE)
+    assert loaded.output_shape == (None, *DENSITY_SHAPE)
+    assert loaded.get_layer("e10_refine_3d_conv_1") is not None
 
 
 def test_e10_wrapper_accepts_one_smoke_batch() -> None:

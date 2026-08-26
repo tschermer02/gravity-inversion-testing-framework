@@ -488,9 +488,10 @@ def build_e10_sensitivity_unet_model(
     """Build E10's 128-padded asymmetric 2D U-Net.
 
     All 81 x 81 observations are retained by deterministic asymmetric
-    zero-padding.  The decoder stops at 64 x 64 and predicts the 24 physical
-    density slices directly as channels; no three-dimensional convolution is
-    used.
+    zero-padding.  A complete decoder restores the 128 x 128 representation,
+    including its highest-resolution encoder skip.  Learned stride-two
+    projection maps those features to 64 x 64 before direct depth-channel
+    prediction and a lightweight residual three-dimensional refinement.
     """
 
     if config is None:
@@ -546,8 +547,23 @@ def build_e10_sensitivity_unet_model(
         filters=filters * 2,
         name="e10_decoder_64",
     )
+    decoded_128 = tf.keras.layers.Conv2DTranspose(
+        filters, 2, strides=2, padding="same", activation="relu",
+        kernel_initializer="he_normal", name="e10_upsample_64_to_128",
+    )(decoded_64)
+    decoded_128 = _convolution_2d_block(
+        tf.keras.layers.Concatenate(name="e10_skip_128")(
+            [decoded_128, encoder_128]
+        ),
+        filters=filters,
+        name="e10_decoder_128",
+    )
+    final_features = tf.keras.layers.Conv2D(
+        filters, 3, strides=2, padding="same", activation="relu",
+        kernel_initializer="he_normal", name="e10_learned_projection_128_to_64",
+    )(decoded_128)
     final_features = _convolution_2d_block(
-        decoded_64, filters=filters, name="e10_final_64_features"
+        final_features, filters=filters, name="e10_projected_64_features"
     )
     depth_channels = tf.keras.layers.Conv2D(
         24, 1, padding="same", activation=config.output_activation,
@@ -556,10 +572,29 @@ def build_e10_sensitivity_unet_model(
     depth_first = tf.keras.layers.Permute(
         (3, 1, 2), name="e10_permute_depth_channels_first"
     )(depth_channels)
-    outputs = tf.keras.layers.Reshape(
-        DENSITY_SHAPE, name="e10_recovered_density"
+    initial_volume = tf.keras.layers.Reshape(
+        DENSITY_SHAPE, name="e10_initial_density_volume"
     )(depth_first)
-    model = tf.keras.Model(inputs, outputs, name="e10_sensitivity_2d_unet")
+    refinement = tf.keras.layers.Conv3D(
+        8, 3, padding="same", activation="relu", kernel_initializer="he_normal",
+        name="e10_refine_3d_conv_1",
+    )(initial_volume)
+    refinement = tf.keras.layers.Conv3D(
+        8, 3, padding="same", activation="relu", kernel_initializer="he_normal",
+        name="e10_refine_3d_conv_2",
+    )(refinement)
+    correction = tf.keras.layers.Conv3D(
+        1, 1, padding="same", activation=None,
+        kernel_initializer="zeros", bias_initializer="zeros",
+        name="e10_refine_3d_correction",
+    )(refinement)
+    refined = tf.keras.layers.Add(name="e10_residual_density_refinement")(
+        [initial_volume, correction]
+    )
+    outputs = tf.keras.layers.ReLU(
+        max_value=1.0, name="e10_recovered_density"
+    )(refined)
+    model = tf.keras.Model(inputs, outputs, name="e10_sensitivity_conv3d_unet")
     if model.output_shape != (None, *DENSITY_SHAPE):
         raise RuntimeError(f"Unexpected E10 output shape: {model.output_shape}")
     return model
