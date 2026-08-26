@@ -1,0 +1,43 @@
+{
+  "input_gravity_shape": [
+    2,
+    81,
+    81,
+    1
+  ],
+  "padded_input_shape": [
+    2,
+    128,
+    128,
+    1
+  ],
+  "depth_channel_shape": [
+    2,
+    64,
+    64,
+    24
+  ],
+  "density_volume_shape": [
+    2,
+    24,
+    64,
+    64,
+    1
+  ],
+  "iou_loss": 0.9934966564178467,
+  "sensitivity_loss": 0.16379623115062714,
+  "gravity_loss": 1718.9715576171875,
+  "total_loss": 1.3291900157928467,
+  "iou_gradient_norm": 0.00024420107365585864,
+  "sensitivity_gradient_norm": 0.7280773520469666,
+  "gravity_gradient_norm": 14309.275390625,
+  "total_gradient_norm": 2.1582961082458496,
+  "weighted_shape_gradient_norm": 0.00024420107365585864,
+  "weighted_density_gradient_norm": 0.7280773520469666,
+  "weighted_physics_gradient_norm": 1.4309275390625,
+  "sensitivity_balancing_enabled": true,
+  "physics_contribution_enabled": true,
+  "all_terms_differentiable": true,
+  "density_order": "batch,z,y,x,channel",
+  "gravity_order": "batch,y,x,channel"
+}
