@@ -1,0 +1,178 @@
+{
+  "overall": {
+    "number_of_samples": 100,
+    "mse": {
+      "mean": 0.005002004729176406,
+      "median": 0.003938096109777689,
+      "standard_deviation": 0.003716097804001749,
+      "minimum": 0.0004639791150111705,
+      "maximum": 0.016761386767029762,
+      "percentile_25": 0.00215118529740721,
+      "percentile_75": 0.0071318264817819
+    },
+    "iou": {
+      "mean": 0.1732618754569643,
+      "median": 0.1506556642102609,
+      "standard_deviation": 0.09843557835037052,
+      "minimum": 0.02097902097902098,
+      "maximum": 0.42759961127308066,
+      "percentile_25": 0.09444223913821823,
+      "percentile_75": 0.24910586731383577
+    },
+    "dice": {
+      "mean": 0.2837364895462165,
+      "median": 0.2618591608909582,
+      "standard_deviation": 0.13892942496642335,
+      "minimum": 0.0410958904109589,
+      "maximum": 0.5990469707283866,
+      "percentile_25": 0.17258512110951524,
+      "percentile_75": 0.3988546575888913
+    },
+    "predicted_max": {
+      "mean": 0.6350890588760376,
+      "median": 0.6374702155590057,
+      "standard_deviation": 0.16968381269963992,
+      "minimum": 0.31583455204963684,
+      "maximum": 0.8842067718505859,
+      "percentile_25": 0.5044586211442947,
+      "percentile_75": 0.8091223835945129
+    }
+  },
+  "depth_groups": {
+    "shallow": {
+      "number_of_samples": 68,
+      "mean_iou": 0.18796522880598165,
+      "median_iou": 0.16420195329228393,
+      "mean_dice": 0.3035416886053897,
+      "median_dice": 0.2820849843907185
+    },
+    "medium": {
+      "number_of_samples": 32,
+      "mean_iou": 0.14201724959030237,
+      "median_iou": 0.141858711831158,
+      "mean_dice": 0.24165044154547355,
+      "median_dice": 0.2484690662293827
+    }
+  },
+  "correlations": {
+    "top_depth_m": {
+      "iou_correlation": -0.21702731341943696,
+      "dice_correlation": -0.20779392338746197
+    },
+    "center_depth_m": {
+      "iou_correlation": 0.13500347419654565,
+      "dice_correlation": 0.145402641211338
+    },
+    "thickness_z_m": {
+      "iou_correlation": 0.7293608138190976,
+      "dice_correlation": 0.7336896451787253
+    },
+    "body_volume_cells": {
+      "iou_correlation": 0.7661401155452379,
+      "dice_correlation": 0.7688749581334995
+    },
+    "density_contrast": {
+      "iou_correlation": -0.21985327856224465,
+      "dice_correlation": -0.22256318567643787
+    },
+    "center_distance_m": {
+      "iou_correlation": -0.41627968262180776,
+      "dice_correlation": -0.418175298391488
+    },
+    "gravity_maximum_mgal": {
+      "iou_correlation": 0.6320778045568709,
+      "dice_correlation": 0.6358195873014468
+    },
+    "gravity_std_mgal": {
+      "iou_correlation": 0.6462093832769074,
+      "dice_correlation": 0.6521383326582768
+    }
+  },
+  "gravity_consistency": {
+    "number_of_samples": 100,
+    "metrics": {
+      "gravity_mse": {
+        "mean": 0.014954517389064469,
+        "median": 0.010987156813879774,
+        "standard_deviation": 0.013644947499684056,
+        "minimum": 0.0004165385762156308,
+        "maximum": 0.06434299350059312
+      },
+      "gravity_rmse": {
+        "mean": 0.11057477263361706,
+        "median": 0.10481045095374537,
+        "standard_deviation": 0.05222774211172025,
+        "minimum": 0.020409276719561397,
+        "maximum": 0.253659207403542
+      },
+      "gravity_mae": {
+        "mean": 0.047822721629240526,
+        "median": 0.04430634665141221,
+        "standard_deviation": 0.023842877317898897,
+        "minimum": 0.008364092494577561,
+        "maximum": 0.11380242141917135
+      },
+      "gravity_relative_l2": {
+        "mean": 5.012229678116523,
+        "median": 4.323078786239831,
+        "standard_deviation": 2.986663667704465,
+        "minimum": 0.9115357669191397,
+        "maximum": 13.822889190067055
+      },
+      "gravity_correlation": {
+        "mean": 0.9674182399806536,
+        "median": 0.9826351925357066,
+        "standard_deviation": 0.05076020365531004,
+        "minimum": 0.6273902210202372,
+        "maximum": 0.9989448143854033
+      },
+      "gravity_max_abs_residual": {
+        "mean": 0.6440461065066025,
+        "median": 0.6074265456158211,
+        "standard_deviation": 0.2604586113664434,
+        "minimum": 0.12867794692858547,
+        "maximum": 1.2989759761347826
+      },
+      "gravity_mean_residual": {
+        "mean": 0.047822721629240526,
+        "median": 0.04430634665141221,
+        "standard_deviation": 0.023842877317898897,
+        "minimum": 0.008364092494577561,
+        "maximum": 0.11380242141917135
+      },
+      "gravity_residual_std": {
+        "mean": 0.09965661710820427,
+        "median": 0.09502916897939702,
+        "standard_deviation": 0.04655728248930585,
+        "minimum": 0.01826120487342082,
+        "maximum": 0.22669804229354618
+      },
+      "gravity_receiver_00_rmse": {
+        "mean": 0.11057477263361706,
+        "median": 0.10481045095374537,
+        "standard_deviation": 0.05222774211172025,
+        "minimum": 0.020409276719561397,
+        "maximum": 0.253659207403542
+      },
+      "gravity_receiver_00_relative_l2": {
+        "mean": 5.012229678116523,
+        "median": 4.323078786239831,
+        "standard_deviation": 2.986663667704465,
+        "minimum": 0.9115357669191397,
+        "maximum": 13.822889190067055
+      },
+      "gravity_receiver_00_correlation": {
+        "mean": 0.9674182399806536,
+        "median": 0.9826351925357066,
+        "standard_deviation": 0.05076020365531004,
+        "minimum": 0.6273902210202372,
+        "maximum": 0.9989448143854033
+      }
+    },
+    "total_evaluated_samples": 100,
+    "computed_this_run": 100,
+    "reused_existing_results": 0,
+    "failed": 0,
+    "residual_convention": "recovered_gravity - true_gravity"
+  }
+}
