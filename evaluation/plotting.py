@@ -13,6 +13,9 @@ def plot_gravity_anomaly(
     grid: GridSpec,
     case_name: str,
     output_path: Path,
+    *,
+    cmap: str = "RdBu_r",
+    zero_centered: bool = True,
 ) -> None:
     """
     Plot a 2-D surface gravity anomaly map.
@@ -37,12 +40,17 @@ def plot_gravity_anomaly(
             "Gravity anomaly contains NaN or infinite values."
         )
 
-    anomaly_limit = float(
-        np.max(np.abs(anomaly))
-    )
-
-    if np.isclose(anomaly_limit, 0.0):
-        anomaly_limit = 1.0
+    if zero_centered:
+        anomaly_limit = float(np.max(np.abs(anomaly)))
+        if np.isclose(anomaly_limit, 0.0):
+            anomaly_limit = 1.0
+        color_minimum = -anomaly_limit
+        color_maximum = anomaly_limit
+    else:
+        color_minimum = float(np.min(anomaly))
+        color_maximum = float(np.max(anomaly))
+        if np.isclose(color_minimum, color_maximum):
+            color_maximum = color_minimum + 1.0
 
     figure, axis = plt.subplots(
         figsize=(8, 7),
@@ -59,9 +67,9 @@ def plot_gravity_anomaly(
             grid.y_max,
         ),
         aspect="equal",
-        cmap="RdBu_r",
-        vmin=-anomaly_limit,
-        vmax=anomaly_limit,
+        cmap=cmap,
+        vmin=color_minimum,
+        vmax=color_maximum,
     )
 
     peak_y_index, peak_x_index = np.unravel_index(
@@ -354,6 +362,9 @@ def plot_gravity_fit_comparison(
     grid: GridSpec,
     case_name: str,
     output_path: Path,
+    *,
+    gravity_cmap: str = "RdBu_r",
+    gravity_zero_centered: bool = True,
 ) -> None:
     """
     Compare original gravity, recovered-model gravity, and their residual.
@@ -386,15 +397,26 @@ def plot_gravity_fit_comparison(
         - original_gravity
     )
 
-    gravity_limit = float(
-        max(
-            np.max(np.abs(original_gravity)),
-            np.max(np.abs(recovered_gravity)),
+    if gravity_zero_centered:
+        gravity_limit = float(
+            max(
+                np.max(np.abs(original_gravity)),
+                np.max(np.abs(recovered_gravity)),
+            )
         )
-    )
-
-    if np.isclose(gravity_limit, 0.0):
-        gravity_limit = 1.0
+        if np.isclose(gravity_limit, 0.0):
+            gravity_limit = 1.0
+        gravity_minimum = -gravity_limit
+        gravity_maximum = gravity_limit
+    else:
+        gravity_minimum = float(
+            min(np.min(original_gravity), np.min(recovered_gravity))
+        )
+        gravity_maximum = float(
+            max(np.max(original_gravity), np.max(recovered_gravity))
+        )
+        if np.isclose(gravity_minimum, gravity_maximum):
+            gravity_maximum = gravity_minimum + 1.0
 
     residual_limit = float(
         np.max(np.abs(residual))
@@ -420,9 +442,9 @@ def plot_gravity_fit_comparison(
             grid.y_max,
         ),
         aspect="equal",
-        cmap="RdBu_r",
-        vmin=-gravity_limit,
-        vmax=gravity_limit,
+        cmap=gravity_cmap,
+        vmin=gravity_minimum,
+        vmax=gravity_maximum,
     )
 
     axes[0].set_title(
@@ -441,9 +463,9 @@ def plot_gravity_fit_comparison(
             grid.y_max,
         ),
         aspect="equal",
-        cmap="RdBu_r",
-        vmin=-gravity_limit,
-        vmax=gravity_limit,
+        cmap=gravity_cmap,
+        vmin=gravity_minimum,
+        vmax=gravity_maximum,
     )
 
     axes[1].set_title(

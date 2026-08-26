@@ -705,6 +705,9 @@ def run_forward_experiment(
     grid: GridSpec,
     forward_model: GravityForwardModel,
     paths: ExperimentPaths,
+    *,
+    gravity_plot_cmap: str = "RdBu_r",
+    gravity_plot_zero_centered: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, CaseMetrics]:
     """
     Build and forward model one supported synthetic case.
@@ -778,6 +781,8 @@ def run_forward_experiment(
         grid=grid,
         case_name=body.name,
         output_path=gravity_figure_path,
+        cmap=gravity_plot_cmap,
+        zero_centered=gravity_plot_zero_centered,
     )
 
     print_saved_paths(

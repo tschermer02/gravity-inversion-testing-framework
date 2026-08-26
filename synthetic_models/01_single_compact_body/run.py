@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from synthetic_models.common.grid import GridSpec
-from synthetic_models.common.generators import generate_random_body, generate_single_body
+from synthetic_models.common.generators import generate_single_body
 from synthetic_models.common.experiment_runner import run_experiment
 from synthetic_models.common.paths import build_experiment_paths
 from forward_modeling.forward_model import GravityForwardModel
@@ -15,14 +15,14 @@ def define_cases(
 
     return [
         generate_single_body(
-            name="medium_shifted_left",
-            x_start=15,
-            y_start=27,
-            z_start=9,
-            grid=grid,
-        ),
-        generate_random_body(
-            name="random_body_001",
+            name="sample_000044",
+            x_start=24,
+            y_start=19,
+            z_start=7,
+            x_width=7,
+            y_width=14,
+            z_thickness=7,
+            density_contrast=0.8129409408729518,
             grid=grid,
         ),
     ]
@@ -63,6 +63,8 @@ def main() -> None:
             "single_compact_body_metrics.csv"
         ),
         create_cross_case_figures=True,
+        gravity_plot_cmap="viridis",
+        gravity_plot_zero_centered=False,
     )
 
 

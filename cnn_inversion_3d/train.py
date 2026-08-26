@@ -34,10 +34,16 @@ from cnn_inversion_3d.model import (
     VerticalExpansion,
     build_baseline_model,
     build_asymmetric_2d_unet_model,
+    build_e10_sensitivity_unet_model,
     build_single_plane_model,
     build_single_plane_learned_depth_seed_model,
     compile_baseline_model,
     count_trainable_parameters,
+)
+from cnn_inversion_3d.e10_training import (
+    E10LossConfig,
+    E10TrainingModel,
+    build_e10_sensitivity_weights,
 )
 
 from cnn_inversion_3d.normalization import (
@@ -91,6 +97,7 @@ class TrainingConfig:
         "single_plane_2d3d",
         "single_plane_2d3d_learned_depth_seed",
         "single_plane_asymmetric_2d_unet",
+        "single_plane_e10_sensitivity_unet",
     ] = (
         "multi_height_3d"
     )
@@ -98,6 +105,12 @@ class TrainingConfig:
     volume_loss_weight: float = 0.0
     volume_threshold: float = 0.1
     volume_sharpness: float = 60.0
+    e10_lambda_shape: float = 1.0
+    e10_lambda_sensitivity: float = 1.0
+    e10_lambda_physics: float = 1.0e-3
+    e10_sensitivity_gamma: float = 0.5
+    e10_occupancy_threshold: float = 0.1
+    e10_occupancy_sharpness: float = 60.0
 
     collapse_threshold: float = 1.0e-5
     collapse_patience: int = 2
@@ -162,6 +175,7 @@ class TrainingConfig:
             "single_plane_2d3d",
             "single_plane_2d3d_learned_depth_seed",
             "single_plane_asymmetric_2d_unet",
+            "single_plane_e10_sensitivity_unet",
         }:
             raise ValueError("Unsupported architecture.")
         if self.gravity_loss_weight < 0.0:
@@ -178,6 +192,7 @@ class TrainingConfig:
             not in {
                 "single_plane_2d3d_learned_depth_seed",
                 "single_plane_asymmetric_2d_unet",
+                "single_plane_e10_sensitivity_unet",
             }
         ):
             raise ValueError(
@@ -194,6 +209,16 @@ class TrainingConfig:
             raise ValueError(
                 "collapse_patience must be at least one."
             )
+        if self.architecture == "single_plane_e10_sensitivity_unet":
+            E10LossConfig(
+                lambda_shape=self.e10_lambda_shape,
+                lambda_sensitivity=self.e10_lambda_sensitivity,
+                lambda_physics=self.e10_lambda_physics,
+                sensitivity_gamma=self.e10_sensitivity_gamma,
+                occupancy_threshold=self.e10_occupancy_threshold,
+                occupancy_sharpness=self.e10_occupancy_sharpness,
+                body_fraction=self.body_loss_fraction,
+            ).validate()
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -277,6 +302,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "single_plane_2d3d",
             "single_plane_2d3d_learned_depth_seed",
             "single_plane_asymmetric_2d_unet",
+            "single_plane_e10_sensitivity_unet",
         ),
         default=None,
         help="Additive model/data path. Default preserves multi-height 3D.",
@@ -304,6 +330,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--volume-sharpness", type=float, default=None,
         help="Sigmoid sharpness for soft occupancy. Default: 60.",
     )
+    parser.add_argument("--e10-lambda-shape", type=float, default=None)
+    parser.add_argument("--e10-lambda-sensitivity", type=float, default=None)
+    parser.add_argument("--e10-lambda-physics", type=float, default=None)
+    parser.add_argument("--e10-sensitivity-gamma", type=float, default=None)
+    parser.add_argument("--e10-occupancy-threshold", type=float, default=None)
+    parser.add_argument("--e10-occupancy-sharpness", type=float, default=None)
 
     parser.add_argument(
         "--vertical-expansion",
@@ -444,6 +476,17 @@ def apply_arguments(
         values["volume_threshold"] = arguments.volume_threshold
     if arguments.volume_sharpness is not None:
         values["volume_sharpness"] = arguments.volume_sharpness
+    for argument_name, config_name in (
+        ("e10_lambda_shape", "e10_lambda_shape"),
+        ("e10_lambda_sensitivity", "e10_lambda_sensitivity"),
+        ("e10_lambda_physics", "e10_lambda_physics"),
+        ("e10_sensitivity_gamma", "e10_sensitivity_gamma"),
+        ("e10_occupancy_threshold", "e10_occupancy_threshold"),
+        ("e10_occupancy_sharpness", "e10_occupancy_sharpness"),
+    ):
+        value = getattr(arguments, argument_name)
+        if value is not None:
+            values[config_name] = value
 
     if arguments.learning_rate is not None:
         values["learning_rate"] = (
@@ -776,6 +819,9 @@ def save_training_metadata(
         },
         "loss": {
             "name": (
+                "e10_soft_iou_plus_sensitivity_balanced_mse_plus_data_weighted_gravity"
+                if config.architecture == "single_plane_e10_sensitivity_unet"
+                else
                 "balanced_density_mse_plus_global_normalized_gravity_mse_plus_excess_volume_loss"
                 if config.volume_loss_weight > 0.0
                 else "balanced_density_mse_plus_global_normalized_gravity_mse"
@@ -787,7 +833,9 @@ def save_training_metadata(
             ),
             "gravity_loss_weight": config.gravity_loss_weight,
             "gravity_loss_definition": (
-                "mean(square(F(rho_pred)/gravity_scale - "
+                "mean(square((G_true - F(rho_pred)) / Wd)) in mGal"
+                if config.architecture == "single_plane_e10_sensitivity_unet"
+                else "mean(square(F(rho_pred)/gravity_scale - "
                 "G_true/gravity_scale)) over all batch samples and pixels"
                 if config.gravity_loss_weight > 0.0
                 else None
@@ -797,7 +845,9 @@ def save_training_metadata(
                 - config.body_loss_fraction
             ),
             "gravity_loss_normalization": (
-                "training_set_global_percentile_99"
+                "Wd=sqrt(diag(GG^T)); input Gz restored to mGal using training-set global percentile_99"
+                if config.architecture == "single_plane_e10_sensitivity_unet"
+                else "training_set_global_percentile_99"
                 if config.gravity_loss_weight > 0.0
                 else None
             ),
@@ -812,8 +862,29 @@ def save_training_metadata(
                 if config.volume_loss_weight > 0.0 else None
             ),
             "loss_equation": (
-                "BalancedDensityMSE + gravity_loss_weight * global_normalized_gravity_mse "
+                "lambda_shape * soft_iou_loss + lambda_sensitivity * "
+                "sensitivity_balanced_50_50_mse + lambda_physics * "
+                "Wd_inverse_gravity_mse"
+                if config.architecture == "single_plane_e10_sensitivity_unet"
+                else "BalancedDensityMSE + gravity_loss_weight * global_normalized_gravity_mse "
                 "+ volume_loss_weight * excess_occupied_volume_fraction_loss"
+            ),
+            "e10": (
+                {
+                    "lambda_shape": config.e10_lambda_shape,
+                    "lambda_sensitivity": config.e10_lambda_sensitivity,
+                    "lambda_physics": config.e10_lambda_physics,
+                    "sensitivity_gamma": config.e10_sensitivity_gamma,
+                    "occupancy_threshold": config.e10_occupancy_threshold,
+                    "occupancy_sharpness": config.e10_occupancy_sharpness,
+                    "body_fraction": config.body_loss_fraction,
+                    "background_fraction": 1.0 - config.body_loss_fraction,
+                    "gravity_units": "mGal before Wd normalization",
+                    "density_order": "z,y,x",
+                    "gravity_order": "y,x",
+                }
+                if config.architecture == "single_plane_e10_sensitivity_unet"
+                else None
             ),
         },
         "explicit_regularization": (
@@ -855,6 +926,20 @@ def save_training_metadata(
             "96 -> 48 -> 24 -> 12 2D U-Net encoder",
             "12 -> 24 -> 48 -> 96 2D U-Net decoder with skip connections",
             "96 x 96 learned valid-convolution transform to 64 x 64",
+            "64 x 64 x 24 directly supervised physical depth channels",
+            "24 x 64 x 64 x 1 deterministic canonical permutation/reshape",
+        ]
+    elif config.architecture == "single_plane_e10_sensitivity_unet":
+        metadata["dimensional_transformations"] = [
+            "81 x 81 x 1 complete surface Gz",
+            "128 x 128 x 1 deterministic zero-padded surface",
+            "128 x 128 x 8 encoder features",
+            "64 x 64 x 16 encoder features",
+            "32 x 32 x 32 encoder features",
+            "16 x 16 x 64 bottleneck",
+            "32 x 32 x 32 decoder features with skip",
+            "64 x 64 x 16 decoder features with skip",
+            "64 x 64 x 8 final 2D features",
             "64 x 64 x 24 directly supervised physical depth channels",
             "24 x 64 x 64 x 1 deterministic canonical permutation/reshape",
         ]
@@ -1033,6 +1118,102 @@ def run_physics_preflight(
     }
 
 
+def run_e10_preflight(
+    model: E10TrainingModel,
+    gravity: tf.Tensor,
+    density: tf.Tensor,
+) -> dict[str, Any]:
+    """Verify E10 shapes, finite losses, and gradients before fitting."""
+
+    variables = model.inversion_model.trainable_variables
+    with tf.GradientTape(persistent=True) as tape:
+        terms = model.compute_loss_terms(gravity, density, training=False)
+    names = ("iou", "sensitivity", "gravity", "total")
+    losses = dict(zip(names, terms[1:]))
+
+    def norm(loss: tf.Tensor) -> float:
+        gradients = tape.gradient(loss, variables)
+        values = [value for value in gradients if value is not None]
+        return float(tf.linalg.global_norm(values).numpy())
+
+    gradient_norms = {f"{name}_gradient_norm": norm(loss) for name, loss in losses.items()}
+    del tape
+    prediction = terms[0]
+    expected_input = (gravity.shape[0], 81, 81, 1)
+    expected_density = (gravity.shape[0], 24, 64, 64, 1)
+    if tuple(gravity.shape) != expected_input:
+        raise ValueError(f"E10 input shape mismatch: {gravity.shape}")
+    if tuple(prediction.shape) != expected_density:
+        raise ValueError(f"E10 density shape mismatch: {prediction.shape}")
+    values = [float(loss.numpy()) for loss in losses.values()]
+    if not np.all(np.isfinite(values + list(gradient_norms.values()))):
+        raise ValueError("E10 preflight contains nonfinite losses or gradients.")
+    return {
+        "input_gravity_shape": list(gravity.shape),
+        "padded_input_shape": [gravity.shape[0], 128, 128, 1],
+        "depth_channel_shape": [gravity.shape[0], 64, 64, 24],
+        "density_volume_shape": list(prediction.shape),
+        "iou_loss": float(losses["iou"].numpy()),
+        "sensitivity_loss": float(losses["sensitivity"].numpy()),
+        "gravity_loss": float(losses["gravity"].numpy()),
+        "total_loss": float(losses["total"].numpy()),
+        **gradient_norms,
+        "all_terms_differentiable": all(value > 0.0 for value in gradient_norms.values()),
+        "density_order": "batch,z,y,x,channel",
+        "gravity_order": "batch,y,x,channel",
+    }
+
+
+def save_e10_weight_visualization(
+    sensitivity: np.ndarray,
+    weights: np.ndarray,
+    output_directory: Path,
+) -> None:
+    """Save E10 fixed arrays and compact depth-profile visualization."""
+
+    np.save(output_directory / "e10_integrated_sensitivity.npy", sensitivity)
+    np.save(output_directory / "e10_sensitivity_weights.npy", weights)
+    depth_m = (np.arange(sensitivity.shape[0]) + 0.5) * 10.0
+    figure, axes = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True)
+    axes[0, 0].plot(np.mean(sensitivity, axis=(1, 2)), depth_m, marker="o")
+    axes[0, 0].set(xlabel="Mean integrated sensitivity", ylabel="Depth (m)", title="S(z)")
+    axes[0, 1].plot(np.mean(weights, axis=(1, 2)), depth_m, marker="o")
+    axes[0, 1].set(xlabel="Mean inverse-sensitivity weight", title="w_sens(z)")
+    for axis in axes[0]:
+        axis.invert_yaxis(); axis.grid(alpha=0.3)
+    sensitivity_image = axes[1, 0].imshow(
+        sensitivity[:, sensitivity.shape[1] // 2, :], origin="upper", aspect="auto",
+        extent=(0, 640, 240, 0), cmap="viridis",
+    )
+    axes[1, 0].set(xlabel="X (m)", ylabel="Depth (m)", title="Central X-Z sensitivity")
+    figure.colorbar(sensitivity_image, ax=axes[1, 0], shrink=0.8)
+    weight_image = axes[1, 1].imshow(
+        weights[:, weights.shape[1] // 2, :], origin="upper", aspect="auto",
+        extent=(0, 640, 240, 0), cmap="magma",
+    )
+    axes[1, 1].set(xlabel="X (m)", ylabel="Depth (m)", title="Central X-Z sensitivity weight")
+    figure.colorbar(weight_image, ax=axes[1, 1], shrink=0.8)
+    figure.savefig(output_directory / "e10_sensitivity_weights.png", dpi=180)
+    plt.close(figure)
+
+
+def save_e10_loss_history_figure(
+    history: tf.keras.callbacks.History, output_path: Path
+) -> None:
+    """Plot E10 total and individual train/validation loss components."""
+
+    figure, axis = plt.subplots(figsize=(9, 5))
+    for name in ("loss", "iou_loss", "sensitivity_loss", "gravity_loss"):
+        if name in history.history:
+            axis.plot(history.history[name], label=name)
+        validation_name = f"val_{name}"
+        if validation_name in history.history:
+            axis.plot(history.history[validation_name], linestyle="--", label=validation_name)
+    axis.set(xlabel="Epoch", ylabel="Loss", title="E10 loss components")
+    axis.grid(alpha=0.3); axis.legend(ncol=2)
+    figure.tight_layout(); figure.savefig(output_path, dpi=180); plt.close(figure)
+
+
 def main() -> None:
     """Train the baseline 3D CNN."""
 
@@ -1114,7 +1295,9 @@ def main() -> None:
         ),
     )
 
-    if config.architecture == "single_plane_asymmetric_2d_unet":
+    if config.architecture == "single_plane_e10_sensitivity_unet":
+        model = build_e10_sensitivity_unet_model(model_config)
+    elif config.architecture == "single_plane_asymmetric_2d_unet":
         model = build_asymmetric_2d_unet_model(model_config)
     elif config.architecture == "single_plane_2d3d_learned_depth_seed":
         model = build_single_plane_learned_depth_seed_model(model_config)
@@ -1123,11 +1306,47 @@ def main() -> None:
     else:
         model = build_baseline_model(model_config)
     inversion_model = model
+    e10_training = config.architecture == "single_plane_e10_sensitivity_unet"
     physics_training = (
-        config.gravity_loss_weight > 0.0 or config.volume_loss_weight > 0.0
+        e10_training
+        or config.gravity_loss_weight > 0.0
+        or config.volume_loss_weight > 0.0
     )
     pretraining_loss_scales: dict[str, Any] | None = None
-    if physics_training:
+    if e10_training:
+        sensitivity, sensitivity_weights, data_weights = build_e10_sensitivity_weights(
+            gamma=config.e10_sensitivity_gamma
+        )
+        save_e10_weight_visualization(
+            sensitivity, sensitivity_weights, output_directory
+        )
+        np.save(output_directory / "e10_data_weights.npy", data_weights)
+        e10_loss_config = E10LossConfig(
+            lambda_shape=config.e10_lambda_shape,
+            lambda_sensitivity=config.e10_lambda_sensitivity,
+            lambda_physics=config.e10_lambda_physics,
+            sensitivity_gamma=config.e10_sensitivity_gamma,
+            occupancy_threshold=config.e10_occupancy_threshold,
+            occupancy_sharpness=config.e10_occupancy_sharpness,
+            body_fraction=config.body_loss_fraction,
+        )
+        model = E10TrainingModel(
+            inversion_model,
+            DifferentiableSinglePlaneGz(),
+            sensitivity_weights,
+            data_weights,
+            gravity_scale=resolved_gravity_scale,
+            loss_config=e10_loss_config,
+        )
+        model.compile(optimizer=tf.keras.optimizers.Adam(config.learning_rate))
+        sample_gravity, sample_density = next(iter(training_dataset))
+        pretraining_loss_scales = run_e10_preflight(
+            model, sample_gravity, sample_density
+        )
+        (output_directory / "e10_pretraining_diagnostics.json").write_text(
+            json.dumps(pretraining_loss_scales, indent=2), encoding="utf-8"
+        )
+    elif physics_training:
         model = PhysicsConsistencyTrainingModel(
             inversion_model,
             DifferentiableSinglePlaneGz(),
@@ -1365,6 +1584,10 @@ def main() -> None:
         history=history,
         output_path=history_figure_path,
     )
+    if e10_training:
+        save_e10_loss_history_figure(
+            history, output_directory / "e10_loss_components.png"
+        )
 
     resolved_config = TrainingConfig(
         dataset_directory=dataset_directory,
@@ -1406,6 +1629,12 @@ def main() -> None:
         volume_loss_weight=config.volume_loss_weight,
         volume_threshold=config.volume_threshold,
         volume_sharpness=config.volume_sharpness,
+        e10_lambda_shape=config.e10_lambda_shape,
+        e10_lambda_sensitivity=config.e10_lambda_sensitivity,
+        e10_lambda_physics=config.e10_lambda_physics,
+        e10_sensitivity_gamma=config.e10_sensitivity_gamma,
+        e10_occupancy_threshold=config.e10_occupancy_threshold,
+        e10_occupancy_sharpness=config.e10_occupancy_sharpness,
         collapse_threshold=(
             config.collapse_threshold
         ),

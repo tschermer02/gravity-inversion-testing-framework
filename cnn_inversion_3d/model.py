@@ -482,6 +482,89 @@ def build_asymmetric_2d_unet_model(
     return model
 
 
+def build_e10_sensitivity_unet_model(
+    config: ModelConfig | None = None,
+) -> tf.keras.Model:
+    """Build E10's 128-padded asymmetric 2D U-Net.
+
+    All 81 x 81 observations are retained by deterministic asymmetric
+    zero-padding.  The decoder stops at 64 x 64 and predicts the 24 physical
+    density slices directly as channels; no three-dimensional convolution is
+    used.
+    """
+
+    if config is None:
+        config = ModelConfig()
+    config.validate()
+    filters = config.base_filters
+    inputs = tf.keras.Input(
+        shape=SINGLE_PLANE_GRAVITY_SHAPE,
+        name="e10_surface_gravity_gz",
+    )
+    padded = tf.keras.layers.ZeroPadding2D(
+        padding=((23, 24), (23, 24)),
+        name="e10_pad_complete_81_to_128",
+    )(inputs)
+    encoder_128 = _convolution_2d_block(
+        padded, filters=filters, name="e10_encoder_128"
+    )
+    encoder_64 = _convolution_2d_block(
+        tf.keras.layers.MaxPool2D(2, name="e10_pool_128_to_64")(encoder_128),
+        filters=filters * 2,
+        name="e10_encoder_64",
+    )
+    encoder_32 = _convolution_2d_block(
+        tf.keras.layers.MaxPool2D(2, name="e10_pool_64_to_32")(encoder_64),
+        filters=filters * 4,
+        name="e10_encoder_32",
+    )
+    bottleneck = _convolution_2d_block(
+        tf.keras.layers.MaxPool2D(2, name="e10_pool_32_to_16")(encoder_32),
+        filters=filters * 8,
+        name="e10_bottleneck_16",
+    )
+
+    decoded_32 = tf.keras.layers.Conv2DTranspose(
+        filters * 4, 2, strides=2, padding="same", activation="relu",
+        kernel_initializer="he_normal", name="e10_upsample_16_to_32",
+    )(bottleneck)
+    decoded_32 = _convolution_2d_block(
+        tf.keras.layers.Concatenate(name="e10_skip_32")(
+            [decoded_32, encoder_32]
+        ),
+        filters=filters * 4,
+        name="e10_decoder_32",
+    )
+    decoded_64 = tf.keras.layers.Conv2DTranspose(
+        filters * 2, 2, strides=2, padding="same", activation="relu",
+        kernel_initializer="he_normal", name="e10_upsample_32_to_64",
+    )(decoded_32)
+    decoded_64 = _convolution_2d_block(
+        tf.keras.layers.Concatenate(name="e10_skip_64")(
+            [decoded_64, encoder_64]
+        ),
+        filters=filters * 2,
+        name="e10_decoder_64",
+    )
+    final_features = _convolution_2d_block(
+        decoded_64, filters=filters, name="e10_final_64_features"
+    )
+    depth_channels = tf.keras.layers.Conv2D(
+        24, 1, padding="same", activation=config.output_activation,
+        name="e10_density_depth_channels",
+    )(final_features)
+    depth_first = tf.keras.layers.Permute(
+        (3, 1, 2), name="e10_permute_depth_channels_first"
+    )(depth_channels)
+    outputs = tf.keras.layers.Reshape(
+        DENSITY_SHAPE, name="e10_recovered_density"
+    )(depth_first)
+    model = tf.keras.Model(inputs, outputs, name="e10_sensitivity_2d_unet")
+    if model.output_shape != (None, *DENSITY_SHAPE):
+        raise RuntimeError(f"Unexpected E10 output shape: {model.output_shape}")
+    return model
+
+
 def _build_single_plane_model(
     *,
     config: ModelConfig | None,

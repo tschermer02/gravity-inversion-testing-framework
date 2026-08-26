@@ -45,6 +45,8 @@ def run_cnn_inversion(
     paths: ExperimentPaths,
     clean_reference_gravity: np.ndarray | None = None,
     noise_percent: float | None = None,
+    gravity_plot_cmap: str = "RdBu_r",
+    gravity_plot_zero_centered: bool = True,
 ) -> CaseMetrics:
     """
     Run CNN inversion and evaluate the recovered density model.
@@ -215,6 +217,8 @@ def run_cnn_inversion(
         grid=grid,
         case_name=f"{body.name}: fit to CNN input",
         output_path=input_fit_figure_path,
+        gravity_cmap=gravity_plot_cmap,
+        gravity_zero_centered=gravity_plot_zero_centered,
     )
 
     clean_gravity_metrics: CaseMetrics = {}
@@ -265,6 +269,8 @@ def run_cnn_inversion(
             grid=grid,
             case_name=f"{body.name}: fit to clean gravity",
             output_path=clean_fit_figure_path,
+            gravity_cmap=gravity_plot_cmap,
+            gravity_zero_centered=gravity_plot_zero_centered,
         )
 
     saved_paths = {

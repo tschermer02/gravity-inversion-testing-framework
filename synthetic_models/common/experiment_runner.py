@@ -39,6 +39,8 @@ def run_experiment(
     cnn_inverter: CNNGravityInverter,
     metrics_filename: str,
     create_cross_case_figures: bool = True,
+    gravity_plot_cmap: str = "RdBu_r",
+    gravity_plot_zero_centered: bool = True,
 ) -> list[CaseMetrics]:
     """Run the complete forward-model and CNN-inversion workflow.
 
@@ -93,6 +95,8 @@ def run_experiment(
             grid=grid,
             forward_model=forward_model,
             paths=paths,
+            gravity_plot_cmap=gravity_plot_cmap,
+            gravity_plot_zero_centered=gravity_plot_zero_centered,
         )
 
         cnn_metrics = run_cnn_inversion(
@@ -103,6 +107,8 @@ def run_experiment(
             forward_model=forward_model,
             cnn_inverter=cnn_inverter,
             paths=paths,
+            gravity_plot_cmap=gravity_plot_cmap,
+            gravity_plot_zero_centered=gravity_plot_zero_centered,
         )
 
         combined_metrics: CaseMetrics = {
