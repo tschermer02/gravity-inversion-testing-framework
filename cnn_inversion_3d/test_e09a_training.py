@@ -69,3 +69,33 @@ def test_e09a_gradients_reach_e09_parameters_and_smoke_train() -> None:
         "loss", "density_loss", "depth_profile_loss", "z_center_loss", "depth_loss"
     } <= set(result)
     assert np.all(np.isfinite(list(result.values())))
+
+
+def test_e09a_total_loss_adds_exact_weighted_depth_objective() -> None:
+    gravity = tf.zeros((1, *SINGLE_PLANE_GRAVITY_SHAPE))
+    truth = _density()
+    density_only_model = build_asymmetric_2d_unet_model(ModelConfig(base_filters=1))
+    depth_model = build_asymmetric_2d_unet_model(ModelConfig(base_filters=1))
+    depth_model.set_weights(density_only_model.get_weights())
+    density_only = E09ATrainingModel(
+        density_only_model,
+        loss_config=E09ADepthLossConfig(
+            lambda_density=1.0, lambda_depth=0.0, alpha_center=1.0
+        ),
+    )
+    with_depth = E09ATrainingModel(
+        depth_model,
+        loss_config=E09ADepthLossConfig(
+            lambda_density=1.0, lambda_depth=2.0, alpha_center=0.5
+        ),
+    )
+    density_terms = density_only.compute_loss_terms(gravity, truth, training=False)
+    depth_terms = with_depth.compute_loss_terms(gravity, truth, training=False)
+    np.testing.assert_allclose(density_terms[-1], density_terms[1], rtol=1e-6)
+    expected_depth = depth_terms[2] + 0.5 * depth_terms[3]
+    np.testing.assert_allclose(depth_terms[4], expected_depth, rtol=1e-6)
+    np.testing.assert_allclose(
+        depth_terms[-1], depth_terms[1] + 2.0 * expected_depth, rtol=1e-6
+    )
+    assert float(expected_depth.numpy()) > 0.0
+    assert float(depth_terms[-1].numpy()) > float(density_terms[-1].numpy())

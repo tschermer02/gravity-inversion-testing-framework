@@ -5,6 +5,7 @@ import csv
 import json
 from pathlib import Path
 from typing import Any
+import zipfile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,6 +18,47 @@ from cnn_inversion_3d.dataset import (
     load_npz_sample,
 )
 from cnn_inversion_3d.single_plane_review import SinglePlaneReviewConfig
+from cnn_inversion_3d.model import ModelConfig, build_asymmetric_2d_unet_model
+
+
+def load_prediction_model(model_path: Path) -> tf.keras.Model:
+    """Load a saved model, including newer-Keras E09 initializer archives.
+
+    Keras 3.13 writes ``input_axes`` and ``output_axes`` into variance-scaling
+    initializer configs. Keras 3.12 cannot deserialize those optional fields,
+    although it can read the archive weights. The fallback is intentionally
+    restricted to the unchanged E09/E09A architecture.
+    """
+
+    try:
+        return tf.keras.models.load_model(str(model_path), compile=False)
+    except TypeError as error:
+        message = str(error)
+        if "HeNormal.__init__() got an unexpected keyword argument 'input_axes'" not in message:
+            raise
+        try:
+            with zipfile.ZipFile(model_path) as archive:
+                saved_config = json.loads(archive.read("config.json"))
+        except (KeyError, OSError, ValueError, zipfile.BadZipFile):
+            raise error
+        model_name = saved_config.get("config", {}).get("name")
+        if model_name != "e09_asymmetric_2d_unet":
+            raise error
+        layers = saved_config.get("config", {}).get("layers", [])
+        first_encoder = next(
+            (layer for layer in layers if layer.get("config", {}).get("name") == "e09_encoder_1_conv_1"),
+            None,
+        )
+        if first_encoder is None:
+            raise error
+        base_filters = int(first_encoder["config"]["filters"])
+        model = build_asymmetric_2d_unet_model(ModelConfig(base_filters=base_filters))
+        model.load_weights(model_path)
+        print(
+            "Loaded E09/E09A weights with the Keras 3.13-to-3.12 "
+            "initializer compatibility fallback."
+        )
+        return model
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -673,10 +715,7 @@ def main() -> None:
         :arguments.samples
     ]
 
-    model = tf.keras.models.load_model(
-        str(model_path),
-        compile=False,
-    )
+    model = load_prediction_model(model_path)
 
     results: list[dict[str, Any]] = []
     results_path = (

@@ -496,6 +496,23 @@ def apply_arguments(
         )
     if arguments.architecture is not None:
         values["architecture"] = arguments.architecture
+    e09a_options_supplied = any(
+        getattr(arguments, name) is not None
+        for name in (
+            "e09a_lambda_density", "e09a_lambda_depth",
+            "e09a_alpha_center", "e09a_epsilon",
+        )
+    )
+    selected_architecture = values.get("architecture", config.architecture)
+    if (
+        e09a_options_supplied
+        and selected_architecture != "single_plane_asymmetric_2d_unet_depth_loss"
+    ):
+        raise ValueError(
+            "E09A loss options require --architecture "
+            "single_plane_asymmetric_2d_unet_depth_loss; the ordinary E09 "
+            "architecture selector would ignore depth supervision."
+        )
     if arguments.gravity_loss_weight is not None:
         values["gravity_loss_weight"] = arguments.gravity_loss_weight
     if arguments.volume_loss_weight is not None:
