@@ -13,6 +13,7 @@ from cnn_inversion_3d.e09b_training import (
     integrated_sensitivity_compensated_mse,
 )
 from cnn_inversion_3d.model import ModelConfig, build_asymmetric_2d_unet_model
+from cnn_inversion_3d.train import build_inversion_model_for_architecture
 
 
 @pytest.fixture(scope="module")
@@ -47,6 +48,16 @@ def test_e09b_architecture_is_identical_to_e09_and_e09a() -> None:
     assert e09.to_json() == e09b.to_json()
     assert e09.count_params() == e09b.count_params()
     assert not any(isinstance(layer, tf.keras.layers.Conv3D) for layer in e09b.layers)
+
+
+def test_e09b_training_selector_dispatches_to_e09_model() -> None:
+    model = build_inversion_model_for_architecture(
+        "single_plane_asymmetric_2d_unet_sensitivity_loss",
+        ModelConfig(base_filters=1),
+    )
+    assert model.name == "e09_asymmetric_2d_unet"
+    assert model.input_shape == (None, 81, 81, 1)
+    assert model.output_shape == (None, 24, 64, 64, 1)
 
 
 def test_e09b_zero_lambda_reproduces_e09a_and_positive_adds_exact_term(

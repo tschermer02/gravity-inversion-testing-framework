@@ -478,6 +478,26 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_inversion_model_for_architecture(
+    architecture: str, model_config: ModelConfig
+) -> tf.keras.Model:
+    """Build the inference network selected by the training architecture."""
+
+    if architecture == "single_plane_e10_sensitivity_unet":
+        return build_e10_sensitivity_unet_model(model_config)
+    if architecture in {
+        "single_plane_asymmetric_2d_unet",
+        "single_plane_asymmetric_2d_unet_depth_loss",
+        "single_plane_asymmetric_2d_unet_sensitivity_loss",
+    }:
+        return build_asymmetric_2d_unet_model(model_config)
+    if architecture == "single_plane_2d3d_learned_depth_seed":
+        return build_single_plane_learned_depth_seed_model(model_config)
+    if architecture == "single_plane_2d3d":
+        return build_single_plane_model(model_config)
+    return build_baseline_model(model_config)
+
+
 def apply_arguments(
     *,
     config: TrainingConfig,
@@ -1642,19 +1662,7 @@ def main() -> None:
         ),
     )
 
-    if config.architecture == "single_plane_e10_sensitivity_unet":
-        model = build_e10_sensitivity_unet_model(model_config)
-    elif config.architecture in {
-        "single_plane_asymmetric_2d_unet",
-        "single_plane_asymmetric_2d_unet_depth_loss",
-    }:
-        model = build_asymmetric_2d_unet_model(model_config)
-    elif config.architecture == "single_plane_2d3d_learned_depth_seed":
-        model = build_single_plane_learned_depth_seed_model(model_config)
-    elif config.architecture == "single_plane_2d3d":
-        model = build_single_plane_model(model_config)
-    else:
-        model = build_baseline_model(model_config)
+    model = build_inversion_model_for_architecture(config.architecture, model_config)
     inversion_model = model
     e10_training = config.architecture == "single_plane_e10_sensitivity_unet"
     e09a_training = config.architecture == "single_plane_asymmetric_2d_unet_depth_loss"
