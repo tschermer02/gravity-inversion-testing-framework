@@ -1364,6 +1364,43 @@ def run_e10_preflight(
         "weighted_density_gradient_norm": cfg.lambda_sensitivity * gradient_norms["sensitivity_gradient_norm"],
         "weighted_physics_gradient_norm": cfg.lambda_physics * gradient_norms["gravity_gradient_norm"],
     }
+    del tape
+    prediction = terms[0]
+    expected_input = (gravity.shape[0], 81, 81, 1)
+    expected_density = (gravity.shape[0], 24, 64, 64, 1)
+    if tuple(gravity.shape) != expected_input:
+        raise ValueError(f"E10 input shape mismatch: {gravity.shape}")
+    if tuple(prediction.shape) != expected_density:
+        raise ValueError(f"E10 density shape mismatch: {prediction.shape}")
+    values = [float(loss.numpy()) for loss in losses.values()]
+    if not np.all(
+        np.isfinite(
+            values
+            + list(gradient_norms.values())
+            + list(weighted_gradient_norms.values())
+        )
+    ):
+        raise ValueError("E10 preflight contains nonfinite losses or gradients.")
+    return {
+        "input_gravity_shape": list(gravity.shape),
+        "padded_input_shape": [gravity.shape[0], 128, 128, 1],
+        "depth_channel_shape": [gravity.shape[0], 64, 64, 24],
+        "density_volume_shape": list(prediction.shape),
+        "iou_loss": float(losses["iou"].numpy()),
+        "sensitivity_loss": float(losses["sensitivity"].numpy()),
+        "gravity_loss": float(losses["gravity"].numpy()),
+        "total_loss": float(losses["total"].numpy()),
+        **gradient_norms,
+        **weighted_gradient_norms,
+        "sensitivity_balancing_enabled": cfg.sensitivity_enabled,
+        "physics_contribution_enabled": cfg.lambda_physics > 0.0,
+        "all_terms_differentiable": all(
+            gradient_norms[f"{name}_gradient_norm"] > 0.0
+            for name in ("iou", "sensitivity", "gravity")
+        ),
+        "density_order": "batch,z,y,x,channel",
+        "gravity_order": "batch,y,x,channel",
+    }
 
 
 def run_e09a_preflight(
@@ -1567,37 +1604,6 @@ def save_e09b_loss_history_figure(
     axis.set(xlabel="Epoch", ylabel="Loss", title="E09B loss components")
     axis.grid(alpha=0.3); axis.legend(ncol=2)
     figure.tight_layout(); figure.savefig(output_path, dpi=180); plt.close(figure)
-    del tape
-    prediction = terms[0]
-    expected_input = (gravity.shape[0], 81, 81, 1)
-    expected_density = (gravity.shape[0], 24, 64, 64, 1)
-    if tuple(gravity.shape) != expected_input:
-        raise ValueError(f"E10 input shape mismatch: {gravity.shape}")
-    if tuple(prediction.shape) != expected_density:
-        raise ValueError(f"E10 density shape mismatch: {prediction.shape}")
-    values = [float(loss.numpy()) for loss in losses.values()]
-    if not np.all(np.isfinite(values + list(gradient_norms.values()) + list(weighted_gradient_norms.values()))):
-        raise ValueError("E10 preflight contains nonfinite losses or gradients.")
-    return {
-        "input_gravity_shape": list(gravity.shape),
-        "padded_input_shape": [gravity.shape[0], 128, 128, 1],
-        "depth_channel_shape": [gravity.shape[0], 64, 64, 24],
-        "density_volume_shape": list(prediction.shape),
-        "iou_loss": float(losses["iou"].numpy()),
-        "sensitivity_loss": float(losses["sensitivity"].numpy()),
-        "gravity_loss": float(losses["gravity"].numpy()),
-        "total_loss": float(losses["total"].numpy()),
-        **gradient_norms,
-        **weighted_gradient_norms,
-        "sensitivity_balancing_enabled": cfg.sensitivity_enabled,
-        "physics_contribution_enabled": cfg.lambda_physics > 0.0,
-        "all_terms_differentiable": all(
-            gradient_norms[f"{name}_gradient_norm"] > 0.0
-            for name in ("iou", "sensitivity", "gravity")
-        ),
-        "density_order": "batch,z,y,x,channel",
-        "gravity_order": "batch,y,x,channel",
-    }
 
 
 def save_e10_weight_visualization(

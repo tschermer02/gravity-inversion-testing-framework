@@ -16,6 +16,7 @@ from cnn_inversion_3d.model import ModelConfig, build_asymmetric_2d_unet_model
 from cnn_inversion_3d.train import (
     build_inversion_model_for_architecture,
     run_e09b_preflight,
+    save_e09b_loss_history_figure,
 )
 
 
@@ -124,3 +125,19 @@ def test_e09b_preflight_returns_loss_and_gradient_diagnostics(
     assert np.isfinite(diagnostics["total_loss"])
     assert np.isfinite(diagnostics["sensitivity_gradient_norm"])
     assert "weighted_sensitivity_to_density_gradient_ratio" in diagnostics
+
+
+def test_e09b_loss_history_figure_saves_after_training(tmp_path) -> None:
+    history = tf.keras.callbacks.History()
+    history.history = {
+        "loss": [1.0, 0.8],
+        "val_loss": [1.1, 0.9],
+        "density_loss": [0.5, 0.4],
+        "sensitivity_loss": [0.2, 0.1],
+    }
+    output_path = tmp_path / "e09b_loss_components.png"
+
+    save_e09b_loss_history_figure(history, output_path)
+
+    assert output_path.is_file()
+    assert output_path.stat().st_size > 0
