@@ -223,7 +223,8 @@ AGGREGATES = (
     "absolute_z_center_error_m", "volume_ratio", "mass_ratio",
     "absolute_top_depth_error_m", "absolute_bottom_depth_error_m",
     "absolute_thickness_error_m", "absolute_width_x_error_m", "absolute_width_y_error_m",
-    "lateral_center_error_m", "gravity_rmse", "gravity_correlation", "gravity_relative_l2",
+    "lateral_center_error_m", "gravity_mse", "gravity_rmse", "gravity_mae",
+    "gravity_correlation", "gravity_relative_l2",
 )
 
 

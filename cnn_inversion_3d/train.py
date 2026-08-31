@@ -924,6 +924,7 @@ def save_training_metadata(
     )
 
     metadata: dict[str, Any] = {
+        "experiment_name": config.output_directory.name,
         "training_configuration": (
             training_configuration
         ),
