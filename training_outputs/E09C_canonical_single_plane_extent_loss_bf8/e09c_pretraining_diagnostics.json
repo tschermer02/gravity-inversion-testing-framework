@@ -1,0 +1,37 @@
+{
+  "density_loss": 0.16253624856472015,
+  "depth_profile_loss": 0.012142312712967396,
+  "z_center_loss": 0.04990819841623306,
+  "depth_loss": 0.062050510197877884,
+  "sensitivity_loss": 0.24908342957496643,
+  "top_boundary_loss": 0.003673735773190856,
+  "bottom_boundary_loss": 0.06028115376830101,
+  "thickness_loss": 0.08242878317832947,
+  "extent_loss": 0.04879455640912056,
+  "total_loss": 0.5224647521972656,
+  "density_gradient_norm": 0.08956056833267212,
+  "depth_profile_gradient_norm": 0.0008592705707997084,
+  "z_center_gradient_norm": 0.016737299039959908,
+  "depth_gradient_norm": 0.017263751477003098,
+  "sensitivity_gradient_norm": 0.06349442899227142,
+  "top_boundary_gradient_norm": 0.0021508666686713696,
+  "bottom_boundary_gradient_norm": 0.012386233545839787,
+  "thickness_gradient_norm": 0.015545390546321869,
+  "extent_gradient_norm": 0.008710313588380814,
+  "total_gradient_norm": 0.1208646222949028,
+  "weighted_extent_gradient_norm": 0.008710313588380814,
+  "input_shape": [
+    2,
+    81,
+    81,
+    1
+  ],
+  "output_shape": [
+    2,
+    24,
+    64,
+    64,
+    1
+  ],
+  "density_order": "batch,z,y,x,channel"
+}
