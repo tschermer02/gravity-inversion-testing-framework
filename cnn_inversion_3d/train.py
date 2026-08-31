@@ -1441,19 +1441,6 @@ def run_e09b_preflight(
         "depth": terms[4], "sensitivity": terms[5], "total": terms[6],
     }
 
-def run_e09c_preflight(model:E09CTrainingModel,gravity:tf.Tensor,density:tf.Tensor)->dict[str,Any]:
-    variables=model.inversion_model.trainable_variables
-    with tf.GradientTape(persistent=True) as tape: terms=model.compute_loss_terms(gravity,density,training=False)
-    names=("density","depth_profile","z_center","depth","sensitivity","top_boundary","bottom_boundary","thickness","extent","total")
-    losses=dict(zip(names,terms[1:])); norms={}
-    for name,loss in losses.items():
-        grads=[g for g in tape.gradient(loss,variables) if g is not None]; norms[f"{name}_gradient_norm"]=float(tf.linalg.global_norm(grads).numpy())
-    del tape
-    values={f"{name}_loss":float(loss.numpy()) for name,loss in losses.items()}
-    if not np.all(np.isfinite(list(values.values())+list(norms.values()))): raise ValueError("E09C preflight contains NaN or Inf.")
-    return {**values,**norms,"weighted_extent_gradient_norm":model.loss_config.lambda_extent*norms["extent_gradient_norm"],
-        "input_shape":list(gravity.shape),"output_shape":list(terms[0].shape),"density_order":"batch,z,y,x,channel"}
-
     def norm(loss: tf.Tensor) -> float:
         gradients = [value for value in tape.gradient(loss, variables) if value is not None]
         return float(tf.linalg.global_norm(gradients).numpy())
@@ -1480,6 +1467,41 @@ def run_e09c_preflight(model:E09CTrainingModel,gravity:tf.Tensor,density:tf.Tens
         "sensitivity_gradient_nonzero": norms["sensitivity_gradient_norm"] > 0.0,
         "sensitivity_overwhelms_density_by_orders_of_magnitude": ratio >= 100.0,
         "input_shape": list(gravity.shape), "output_shape": list(terms[0].shape),
+        "density_order": "batch,z,y,x,channel",
+    }
+
+
+def run_e09c_preflight(
+    model: E09CTrainingModel, gravity: tf.Tensor, density: tf.Tensor
+) -> dict[str, Any]:
+    variables = model.inversion_model.trainable_variables
+    with tf.GradientTape(persistent=True) as tape:
+        terms = model.compute_loss_terms(gravity, density, training=False)
+    names = (
+        "density", "depth_profile", "z_center", "depth", "sensitivity",
+        "top_boundary", "bottom_boundary", "thickness", "extent", "total",
+    )
+    losses = dict(zip(names, terms[1:]))
+    norms = {}
+    for name, loss in losses.items():
+        gradients = [
+            value for value in tape.gradient(loss, variables) if value is not None
+        ]
+        norms[f"{name}_gradient_norm"] = float(
+            tf.linalg.global_norm(gradients).numpy()
+        )
+    del tape
+    values = {f"{name}_loss": float(loss.numpy()) for name, loss in losses.items()}
+    if not np.all(np.isfinite(list(values.values()) + list(norms.values()))):
+        raise ValueError("E09C preflight contains NaN or Inf.")
+    return {
+        **values,
+        **norms,
+        "weighted_extent_gradient_norm": (
+            model.loss_config.lambda_extent * norms["extent_gradient_norm"]
+        ),
+        "input_shape": list(gravity.shape),
+        "output_shape": list(terms[0].shape),
         "density_order": "batch,z,y,x,channel",
     }
 

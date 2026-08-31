@@ -13,7 +13,10 @@ from cnn_inversion_3d.e09b_training import (
     integrated_sensitivity_compensated_mse,
 )
 from cnn_inversion_3d.model import ModelConfig, build_asymmetric_2d_unet_model
-from cnn_inversion_3d.train import build_inversion_model_for_architecture
+from cnn_inversion_3d.train import (
+    build_inversion_model_for_architecture,
+    run_e09b_preflight,
+)
 
 
 @pytest.fixture(scope="module")
@@ -103,3 +106,21 @@ def test_e09b_sensitivity_loss_is_differentiable_and_reaches_e09_parameters(
         sensitivity_loss = wrapper.compute_loss_terms(gravity, truth, training=True)[5]
     gradients = tape.gradient(sensitivity_loss, inversion.trainable_variables)
     assert any(value is not None and np.any(value.numpy() != 0.0) for value in gradients)
+
+
+def test_e09b_preflight_returns_loss_and_gradient_diagnostics(
+    sensitivity_data: tuple[np.ndarray, np.ndarray],
+) -> None:
+    _, weights = sensitivity_data
+    gravity, truth = _batch()
+    inversion = build_asymmetric_2d_unet_model(ModelConfig(base_filters=1))
+    wrapper = E09BTrainingModel(inversion, weights, loss_config=E09BLossConfig())
+
+    diagnostics = run_e09b_preflight(wrapper, gravity, truth)
+
+    assert isinstance(diagnostics, dict)
+    assert diagnostics["input_shape"] == [1, 81, 81, 1]
+    assert diagnostics["output_shape"] == [1, 24, 64, 64, 1]
+    assert np.isfinite(diagnostics["total_loss"])
+    assert np.isfinite(diagnostics["sensitivity_gradient_norm"])
+    assert "weighted_sensitivity_to_density_gradient_ratio" in diagnostics
