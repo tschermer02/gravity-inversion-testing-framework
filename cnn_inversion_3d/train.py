@@ -49,6 +49,7 @@ from cnn_inversion_3d.e09a_training import E09ADepthLossConfig, E09ATrainingMode
 from cnn_inversion_3d.e09b_training import (
     E09BLossConfig, E09BTrainingModel, build_e09b_sensitivity_weights,
 )
+from cnn_inversion_3d.e09c_training import E09CLossConfig, E09CTrainingModel
 
 from cnn_inversion_3d.normalization import (
     GravityScaleMethod,
@@ -103,6 +104,7 @@ class TrainingConfig:
         "single_plane_asymmetric_2d_unet",
         "single_plane_asymmetric_2d_unet_depth_loss",
         "single_plane_asymmetric_2d_unet_sensitivity_loss",
+        "single_plane_asymmetric_2d_unet_extent_loss",
         "single_plane_e10_sensitivity_unet",
     ] = (
         "multi_height_3d"
@@ -126,6 +128,10 @@ class TrainingConfig:
     e09b_sensitivity_gamma: float = 0.5
     e09b_weight_min: float = 0.5
     e09b_weight_max: float = 5.0
+    e09c_lambda_extent: float = 1.0
+    e09c_top_quantile: float = 0.05
+    e09c_bottom_quantile: float = 0.95
+    e09c_boundary_sharpness: float = 100.0
 
     collapse_threshold: float = 1.0e-5
     collapse_patience: int = 2
@@ -192,6 +198,7 @@ class TrainingConfig:
             "single_plane_asymmetric_2d_unet",
             "single_plane_asymmetric_2d_unet_depth_loss",
             "single_plane_asymmetric_2d_unet_sensitivity_loss",
+            "single_plane_asymmetric_2d_unet_extent_loss",
             "single_plane_e10_sensitivity_unet",
         }:
             raise ValueError("Unsupported architecture.")
@@ -263,6 +270,12 @@ class TrainingConfig:
                 epsilon=self.e09a_epsilon,
                 body_fraction=self.body_loss_fraction,
             ).validate()
+        if self.architecture == "single_plane_asymmetric_2d_unet_extent_loss":
+            E09CLossConfig(lambda_density=self.e09a_lambda_density,lambda_depth=self.e09a_lambda_depth,alpha_center=self.e09a_alpha_center,
+                lambda_sensitivity=self.e09b_lambda_sensitivity,sensitivity_gamma=self.e09b_sensitivity_gamma,
+                sensitivity_weight_min=self.e09b_weight_min,sensitivity_weight_max=self.e09b_weight_max,
+                lambda_extent=self.e09c_lambda_extent,top_quantile=self.e09c_top_quantile,bottom_quantile=self.e09c_bottom_quantile,
+                boundary_sharpness=self.e09c_boundary_sharpness,epsilon=self.e09a_epsilon,body_fraction=self.body_loss_fraction).validate()
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -348,6 +361,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "single_plane_asymmetric_2d_unet",
             "single_plane_asymmetric_2d_unet_depth_loss",
             "single_plane_asymmetric_2d_unet_sensitivity_loss",
+            "single_plane_asymmetric_2d_unet_extent_loss",
             "single_plane_e10_sensitivity_unet",
         ),
         default=None,
@@ -390,6 +404,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--e09b-sensitivity-gamma", type=float, default=None)
     parser.add_argument("--e09b-weight-min", type=float, default=None)
     parser.add_argument("--e09b-weight-max", type=float, default=None)
+    parser.add_argument("--e09c-lambda-extent", type=float, default=None)
+    parser.add_argument("--e09c-top-quantile", type=float, default=None)
+    parser.add_argument("--e09c-bottom-quantile", type=float, default=None)
+    parser.add_argument("--e09c-boundary-sharpness", type=float, default=None)
     parser.add_argument(
         "--e10-ablation", choices=("A", "B", "C"), default=None,
         help="Controlled E10 loss preset; architecture is identical for A/B/C.",
@@ -489,6 +507,7 @@ def build_inversion_model_for_architecture(
         "single_plane_asymmetric_2d_unet",
         "single_plane_asymmetric_2d_unet_depth_loss",
         "single_plane_asymmetric_2d_unet_sensitivity_loss",
+        "single_plane_asymmetric_2d_unet_extent_loss",
     }:
         return build_asymmetric_2d_unet_model(model_config)
     if architecture == "single_plane_2d3d_learned_depth_seed":
@@ -559,6 +578,7 @@ def apply_arguments(
         and selected_architecture not in {
             "single_plane_asymmetric_2d_unet_depth_loss",
             "single_plane_asymmetric_2d_unet_sensitivity_loss",
+            "single_plane_asymmetric_2d_unet_extent_loss",
         }
     ):
         raise ValueError(
@@ -575,7 +595,7 @@ def apply_arguments(
     )
     if (
         e09b_options_supplied
-        and selected_architecture != "single_plane_asymmetric_2d_unet_sensitivity_loss"
+        and selected_architecture not in {"single_plane_asymmetric_2d_unet_sensitivity_loss","single_plane_asymmetric_2d_unet_extent_loss"}
     ):
         raise ValueError(
             "E09B sensitivity options require --architecture "
@@ -615,6 +635,8 @@ def apply_arguments(
         ("e09b_sensitivity_gamma", "e09b_sensitivity_gamma"),
         ("e09b_weight_min", "e09b_weight_min"),
         ("e09b_weight_max", "e09b_weight_max"),
+        ("e09c_lambda_extent", "e09c_lambda_extent"),("e09c_top_quantile", "e09c_top_quantile"),
+        ("e09c_bottom_quantile", "e09c_bottom_quantile"),("e09c_boundary_sharpness", "e09c_boundary_sharpness"),
     ):
         value = getattr(arguments, argument_name)
         if value is not None:
@@ -953,6 +975,8 @@ def save_training_metadata(
             "name": (
                 "e10_soft_iou_plus_sensitivity_balanced_mse_plus_data_weighted_gravity"
                 if config.architecture == "single_plane_e10_sensitivity_unet"
+                else "e09c_e09b_plus_soft_vertical_extent"
+                if config.architecture == "single_plane_asymmetric_2d_unet_extent_loss"
                 else "e09b_e09a_plus_integrated_sensitivity_compensated_mse"
                 if config.architecture == "single_plane_asymmetric_2d_unet_sensitivity_loss"
                 else "e09a_balanced_density_mse_plus_depth_supervision"
@@ -971,6 +995,8 @@ def save_training_metadata(
             "gravity_loss_definition": (
                 "mean(square((G_true - F(rho_pred)) / Wd)) in mGal"
                 if config.architecture == "single_plane_e10_sensitivity_unet"
+                else "E09B + lambda_extent * (top_boundary_mse + bottom_boundary_mse + thickness_mse) / 3"
+                if config.architecture == "single_plane_asymmetric_2d_unet_extent_loss"
                 else "mean(square(F(rho_pred)/gravity_scale - "
                 "G_true/gravity_scale)) over all batch samples and pixels"
                 if config.gravity_loss_weight > 0.0
@@ -1042,6 +1068,7 @@ def save_training_metadata(
                 if config.architecture in {
                     "single_plane_asymmetric_2d_unet_depth_loss",
                     "single_plane_asymmetric_2d_unet_sensitivity_loss",
+                    "single_plane_asymmetric_2d_unet_extent_loss",
                 }
                 else None
             ),
@@ -1064,9 +1091,13 @@ def save_training_metadata(
                     ),
                     "density_order": "z,y,x",
                 }
-                if config.architecture == "single_plane_asymmetric_2d_unet_sensitivity_loss"
+                if config.architecture in {"single_plane_asymmetric_2d_unet_sensitivity_loss","single_plane_asymmetric_2d_unet_extent_loss"}
                 else None
             ),
+            "e09c": ({"lambda_extent":config.e09c_lambda_extent,"top_quantile":config.e09c_top_quantile,
+                "bottom_quantile":config.e09c_bottom_quantile,"boundary_sharpness":config.e09c_boundary_sharpness,
+                "boundary_method":"soft normalized-Z-mass CDF quantiles on physical cell edges"}
+                if config.architecture=="single_plane_asymmetric_2d_unet_extent_loss" else None),
         },
         "explicit_regularization": (
             "one_sided_zero_floor_excess_occupied_volume_constraint"
@@ -1104,6 +1135,7 @@ def save_training_metadata(
         "single_plane_asymmetric_2d_unet",
         "single_plane_asymmetric_2d_unet_depth_loss",
         "single_plane_asymmetric_2d_unet_sensitivity_loss",
+        "single_plane_asymmetric_2d_unet_extent_loss",
     }:
         metadata["dimensional_transformations"] = [
             "81 x 81 x 1 complete surface Gz",
@@ -1408,6 +1440,19 @@ def run_e09b_preflight(
         "depth": terms[4], "sensitivity": terms[5], "total": terms[6],
     }
 
+def run_e09c_preflight(model:E09CTrainingModel,gravity:tf.Tensor,density:tf.Tensor)->dict[str,Any]:
+    variables=model.inversion_model.trainable_variables
+    with tf.GradientTape(persistent=True) as tape: terms=model.compute_loss_terms(gravity,density,training=False)
+    names=("density","depth_profile","z_center","depth","sensitivity","top_boundary","bottom_boundary","thickness","extent","total")
+    losses=dict(zip(names,terms[1:])); norms={}
+    for name,loss in losses.items():
+        grads=[g for g in tape.gradient(loss,variables) if g is not None]; norms[f"{name}_gradient_norm"]=float(tf.linalg.global_norm(grads).numpy())
+    del tape
+    values={f"{name}_loss":float(loss.numpy()) for name,loss in losses.items()}
+    if not np.all(np.isfinite(list(values.values())+list(norms.values()))): raise ValueError("E09C preflight contains NaN or Inf.")
+    return {**values,**norms,"weighted_extent_gradient_norm":model.loss_config.lambda_extent*norms["extent_gradient_norm"],
+        "input_shape":list(gravity.shape),"output_shape":list(terms[0].shape),"density_order":"batch,z,y,x,channel"}
+
     def norm(loss: tf.Tensor) -> float:
         gradients = [value for value in tape.gradient(loss, variables) if value is not None]
         return float(tf.linalg.global_norm(gradients).numpy())
@@ -1490,6 +1535,7 @@ def save_e09b_loss_history_figure(
     for name in (
         "loss", "density_loss", "depth_profile_loss", "z_center_loss",
         "depth_loss", "sensitivity_loss",
+        "extent_loss", "top_boundary_loss", "bottom_boundary_loss", "thickness_loss",
     ):
         if name in history.history:
             axis.plot(history.history[name], label=name)
@@ -1667,13 +1713,25 @@ def main() -> None:
     e10_training = config.architecture == "single_plane_e10_sensitivity_unet"
     e09a_training = config.architecture == "single_plane_asymmetric_2d_unet_depth_loss"
     e09b_training = config.architecture == "single_plane_asymmetric_2d_unet_sensitivity_loss"
+    e09c_training = config.architecture == "single_plane_asymmetric_2d_unet_extent_loss"
     physics_training = (
         e10_training
         or config.gravity_loss_weight > 0.0
         or config.volume_loss_weight > 0.0
     )
     pretraining_loss_scales: dict[str, Any] | None = None
-    if e09b_training:
+    if e09c_training:
+        sensitivity,sensitivity_weights=build_e09b_sensitivity_weights(gamma=config.e09b_sensitivity_gamma,epsilon=config.e09a_epsilon,weight_min=config.e09b_weight_min,weight_max=config.e09b_weight_max)
+        save_e09b_sensitivity_diagnostics(sensitivity,sensitivity_weights,output_directory)
+        cfg=E09CLossConfig(lambda_density=config.e09a_lambda_density,lambda_depth=config.e09a_lambda_depth,alpha_center=config.e09a_alpha_center,
+            lambda_sensitivity=config.e09b_lambda_sensitivity,sensitivity_gamma=config.e09b_sensitivity_gamma,sensitivity_weight_min=config.e09b_weight_min,
+            sensitivity_weight_max=config.e09b_weight_max,lambda_extent=config.e09c_lambda_extent,top_quantile=config.e09c_top_quantile,
+            bottom_quantile=config.e09c_bottom_quantile,boundary_sharpness=config.e09c_boundary_sharpness,epsilon=config.e09a_epsilon,body_fraction=config.body_loss_fraction)
+        model=E09CTrainingModel(inversion_model,sensitivity_weights,loss_config=cfg); model.compile(optimizer=tf.keras.optimizers.Adam(config.learning_rate))
+        sample_gravity,sample_density=next(iter(training_dataset)); pretraining_loss_scales=run_e09c_preflight(model,sample_gravity,sample_density)
+        (output_directory/"e09c_pretraining_diagnostics.json").write_text(json.dumps(pretraining_loss_scales,indent=2),encoding="utf-8")
+        print("E09C gradient norms:",pretraining_loss_scales)
+    elif e09b_training:
         sensitivity, sensitivity_weights = build_e09b_sensitivity_weights(
             gamma=config.e09b_sensitivity_gamma,
             epsilon=config.e09a_epsilon,
@@ -1878,7 +1936,7 @@ def main() -> None:
 
     checkpoint_callback: tf.keras.callbacks.Callback = (
         SaveBestInversionModel(inversion_model, best_model_path)
-        if (physics_training or e09a_training or e09b_training)
+        if (physics_training or e09a_training or e09b_training or e09c_training)
         else tf.keras.callbacks.ModelCheckpoint(
             filepath=str(best_model_path),
             monitor="val_loss",
@@ -2028,6 +2086,8 @@ def main() -> None:
         save_e09a_loss_history_figure(history, output_directory / "e09a_loss_components.png")
     if e09b_training:
         save_e09b_loss_history_figure(history, output_directory / "e09b_loss_components.png")
+    if e09c_training:
+        save_e09b_loss_history_figure(history, output_directory / "e09c_loss_components.png")
 
     resolved_config = TrainingConfig(
         dataset_directory=dataset_directory,
@@ -2084,6 +2144,10 @@ def main() -> None:
         e09b_sensitivity_gamma=config.e09b_sensitivity_gamma,
         e09b_weight_min=config.e09b_weight_min,
         e09b_weight_max=config.e09b_weight_max,
+        e09c_lambda_extent=config.e09c_lambda_extent,
+        e09c_top_quantile=config.e09c_top_quantile,
+        e09c_bottom_quantile=config.e09c_bottom_quantile,
+        e09c_boundary_sharpness=config.e09c_boundary_sharpness,
         collapse_threshold=(
             config.collapse_threshold
         ),
