@@ -1,0 +1,15 @@
+{
+  "sample_path": "samples/sample_000985.npz",
+  "prediction_path": "sample_000985_prediction.npz",
+  "gravity_mse": 0.005003437454356445,
+  "gravity_rmse": 0.07073498041532524,
+  "gravity_mae": 0.03268869435643335,
+  "gravity_relative_l2": 0.7194156243647953,
+  "gravity_correlation": 0.9938521524720437,
+  "gravity_max_abs_residual": 0.43570894346662326,
+  "gravity_mean_residual": 0.03268869435643335,
+  "gravity_residual_std": 0.0627286753855693,
+  "gravity_receiver_00_rmse": 0.07073498041532524,
+  "gravity_receiver_00_relative_l2": 0.7194156243647953,
+  "gravity_receiver_00_correlation": 0.9938521524720437
+}

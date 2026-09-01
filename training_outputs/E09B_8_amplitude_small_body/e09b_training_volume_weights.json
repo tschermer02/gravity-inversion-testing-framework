@@ -1,0 +1,15 @@
+{
+  "source": "/uufs/chpc.utah.edu/common/home/u1623542/gravity-inversion-testing-framework/datasets/canonical_single_plane_train2000/train_manifest.csv",
+  "split": "training_only",
+  "sample_count": 2000,
+  "median_body_volume_cells": 392.0,
+  "minimum_body_volume_cells": 32.0,
+  "maximum_body_volume_cells": 1920.0,
+  "raw_clipped_weight_mean": 1.0747601048547981,
+  "normalized_weight_mean": 1.0007449350316344,
+  "normalized_weight_minimum": 0.5,
+  "normalized_weight_maximum": 1.8608803871355117,
+  "gamma": 0.5,
+  "clip_minimum": 0.5,
+  "clip_maximum": 2.0
+}
