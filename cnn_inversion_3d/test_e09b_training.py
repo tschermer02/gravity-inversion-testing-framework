@@ -9,7 +9,8 @@ import tensorflow as tf
 from cnn_inversion_3d.dataset import DENSITY_SHAPE, SINGLE_PLANE_GRAVITY_SHAPE
 from cnn_inversion_3d.e09a_training import E09ADepthLossConfig, E09ATrainingModel
 from cnn_inversion_3d.e09b_training import (
-    E09BLossConfig, E09BTrainingModel, build_e09b_sensitivity_weights,
+    E09BLossConfig, E09BTrainingModel, body_volume_sample_weights,
+    build_e09b_sensitivity_weights, density_amplitude_mse_per_sample,
     integrated_sensitivity_compensated_mse,
 )
 from cnn_inversion_3d.model import ModelConfig, build_asymmetric_2d_unet_model
@@ -141,3 +142,37 @@ def test_e09b_loss_history_figure_saves_after_training(tmp_path) -> None:
 
     assert output_path.is_file()
     assert output_path.stat().st_size > 0
+
+
+def test_density_amplitude_loss_uses_true_body_region_and_adds_exact_term(
+    sensitivity_data: tuple[np.ndarray, np.ndarray],
+) -> None:
+    _, weights = sensitivity_data
+    gravity, truth = _batch()
+    prediction = tf.identity(truth * 0.5)
+    losses = density_amplitude_mse_per_sample(truth, prediction)
+    np.testing.assert_allclose(losses.numpy(), [0.09], rtol=1e-5)
+
+    inversion = build_asymmetric_2d_unet_model(ModelConfig(base_filters=1))
+    wrapper = E09BTrainingModel(
+        inversion, weights, loss_config=E09BLossConfig(lambda_amplitude=1.0)
+    )
+    terms = wrapper.compute_loss_terms(gravity, truth, training=False)
+    expected = terms[1] + terms[4] + terms[5] + terms[6]
+    np.testing.assert_allclose(terms[-1], expected, rtol=1e-6)
+    assert float(terms[6].numpy()) > 0.0
+
+
+def test_small_body_weights_favor_small_samples_and_are_training_configured() -> None:
+    truth = np.zeros((2, *DENSITY_SHAPE), np.float32)
+    truth[0, :2, :4, :4, :] = 0.5
+    truth[1, :4, :8, :8, :] = 0.5
+    config = E09BLossConfig(
+        small_body_weighting=True,
+        training_median_body_volume_cells=128.0,
+        training_weight_mean=1.0,
+    )
+    weights = body_volume_sample_weights(tf.constant(truth), config).numpy()
+    assert weights[0] > weights[1]
+    assert np.all(weights >= config.sample_weight_min)
+    assert np.all(weights <= config.sample_weight_max)

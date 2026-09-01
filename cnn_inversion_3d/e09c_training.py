@@ -59,8 +59,8 @@ class E09CTrainingModel(E09BTrainingModel):
     def compute_loss_terms(self,gravity,truth,*,training):
         base=super().compute_loss_terms(gravity,truth,training=training); cfg=self.loss_config
         top,bottom,thick,extent=vertical_extent_losses(truth,base[0],top_quantile=cfg.top_quantile,bottom_quantile=cfg.bottom_quantile,sharpness=cfg.boundary_sharpness,epsilon=cfg.epsilon)
-        total=base[6]+cfg.lambda_extent*extent
+        total=base[7]+cfg.lambda_extent*extent
         return (*base[:6],top,bottom,thick,extent,total)
     def _update(self,truth,terms):
-        super()._update(truth,(*terms[:6],terms[-1]))
+        super()._update(truth,(*terms[:6],tf.constant(0.0,dtype=terms[-1].dtype),terms[-1]))
         for name,value in zip(("top_boundary_loss","bottom_boundary_loss","thickness_loss","extent_loss"),terms[6:10]): self.trackers[name].update_state(value)

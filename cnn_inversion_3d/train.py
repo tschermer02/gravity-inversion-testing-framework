@@ -128,6 +128,13 @@ class TrainingConfig:
     e09b_sensitivity_gamma: float = 0.5
     e09b_weight_min: float = 0.5
     e09b_weight_max: float = 5.0
+    e09b_lambda_amplitude: float = 0.0
+    e09b_small_body_weighting: bool = False
+    e09b_volume_gamma: float = 0.5
+    e09b_sample_weight_min: float = 0.5
+    e09b_sample_weight_max: float = 2.0
+    e09b_training_median_body_volume_cells: float = 1.0
+    e09b_training_weight_mean: float = 1.0
     e09c_lambda_extent: float = 1.0
     e09c_top_quantile: float = 0.05
     e09c_bottom_quantile: float = 0.95
@@ -267,6 +274,11 @@ class TrainingConfig:
                 sensitivity_gamma=self.e09b_sensitivity_gamma,
                 sensitivity_weight_min=self.e09b_weight_min,
                 sensitivity_weight_max=self.e09b_weight_max,
+                lambda_amplitude=self.e09b_lambda_amplitude,
+                small_body_weighting=self.e09b_small_body_weighting,
+                volume_gamma=self.e09b_volume_gamma,
+                sample_weight_min=self.e09b_sample_weight_min,
+                sample_weight_max=self.e09b_sample_weight_max,
                 epsilon=self.e09a_epsilon,
                 body_fraction=self.body_loss_fraction,
             ).validate()
@@ -404,6 +416,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--e09b-sensitivity-gamma", type=float, default=None)
     parser.add_argument("--e09b-weight-min", type=float, default=None)
     parser.add_argument("--e09b-weight-max", type=float, default=None)
+    parser.add_argument("--e09b-lambda-amplitude", type=float, default=None)
+    parser.add_argument("--e09b-small-body-weighting", action="store_true", default=None)
+    parser.add_argument("--e09b-volume-gamma", type=float, default=None)
+    parser.add_argument("--e09b-sample-weight-min", type=float, default=None)
+    parser.add_argument("--e09b-sample-weight-max", type=float, default=None)
     parser.add_argument("--e09c-lambda-extent", type=float, default=None)
     parser.add_argument("--e09c-top-quantile", type=float, default=None)
     parser.add_argument("--e09c-bottom-quantile", type=float, default=None)
@@ -591,6 +608,8 @@ def apply_arguments(
         for name in (
             "e09b_lambda_sensitivity", "e09b_sensitivity_gamma",
             "e09b_weight_min", "e09b_weight_max",
+            "e09b_lambda_amplitude", "e09b_small_body_weighting",
+            "e09b_volume_gamma", "e09b_sample_weight_min", "e09b_sample_weight_max",
         )
     )
     if (
@@ -635,6 +654,11 @@ def apply_arguments(
         ("e09b_sensitivity_gamma", "e09b_sensitivity_gamma"),
         ("e09b_weight_min", "e09b_weight_min"),
         ("e09b_weight_max", "e09b_weight_max"),
+        ("e09b_lambda_amplitude", "e09b_lambda_amplitude"),
+        ("e09b_small_body_weighting", "e09b_small_body_weighting"),
+        ("e09b_volume_gamma", "e09b_volume_gamma"),
+        ("e09b_sample_weight_min", "e09b_sample_weight_min"),
+        ("e09b_sample_weight_max", "e09b_sample_weight_max"),
         ("e09c_lambda_extent", "e09c_lambda_extent"),("e09c_top_quantile", "e09c_top_quantile"),
         ("e09c_bottom_quantile", "e09c_bottom_quantile"),("e09c_boundary_sharpness", "e09c_boundary_sharpness"),
     ):
@@ -1031,7 +1055,9 @@ def save_training_metadata(
                 if config.architecture == "single_plane_e10_sensitivity_unet"
                 else "lambda_density * BalancedDensityMSE + lambda_depth * "
                 "(normalized_depth_profile_mse + alpha_center * normalized_z_center_mse) + "
-                "lambda_sensitivity * integrated_sensitivity_compensated_mse"
+                "lambda_sensitivity * integrated_sensitivity_compensated_mse + "
+                "lambda_amplitude * true_body_region_density_amplitude_mse; optional "
+                "training-only normalized true-body-volume sample weighting"
                 if config.architecture == "single_plane_asymmetric_2d_unet_sensitivity_loss"
                 else "lambda_density * BalancedDensityMSE + lambda_depth * "
                 "(normalized_depth_profile_mse + alpha_center * normalized_z_center_mse)"
@@ -1082,6 +1108,19 @@ def save_training_metadata(
                     "sensitivity_gamma": config.e09b_sensitivity_gamma,
                     "sensitivity_weight_min": config.e09b_weight_min,
                     "sensitivity_weight_max": config.e09b_weight_max,
+                    "lambda_amplitude": config.e09b_lambda_amplitude,
+                    "density_amplitude_definition": (
+                        "square(mean(prediction over true body mask) - "
+                        "mean(truth over true body mask))"
+                    ),
+                    "small_body_weighting": config.e09b_small_body_weighting,
+                    "volume_gamma": config.e09b_volume_gamma,
+                    "sample_weight_min": config.e09b_sample_weight_min,
+                    "sample_weight_max": config.e09b_sample_weight_max,
+                    "training_median_body_volume_cells": config.e09b_training_median_body_volume_cells,
+                    "training_raw_clipped_weight_mean": config.e09b_training_weight_mean,
+                    "volume_statistics_source": "train_manifest.csv only",
+                    "validation_and_test_sample_weighting": False,
                     "epsilon": config.e09a_epsilon,
                     "sensitivity_normalization": "bounded clipped weights with exact global mean one",
                     "sensitivity_definition": "S_k = sqrt(sum_i A_ik^2)",
@@ -1475,7 +1514,8 @@ def run_e09b_preflight(
         terms = model.compute_loss_terms(gravity, density, training=False)
     losses = {
         "density": terms[1], "depth_profile": terms[2], "z_center": terms[3],
-        "depth": terms[4], "sensitivity": terms[5], "total": terms[6],
+        "depth": terms[4], "sensitivity": terms[5], "amplitude": terms[6],
+        "total": terms[7],
     }
 
     def norm(loss: tf.Tensor) -> float:
@@ -1490,6 +1530,9 @@ def run_e09b_preflight(
         "weighted_depth_gradient_norm": cfg.lambda_depth * norms["depth_gradient_norm"],
         "weighted_sensitivity_gradient_norm": (
             cfg.lambda_sensitivity * norms["sensitivity_gradient_norm"]
+        ),
+        "weighted_amplitude_gradient_norm": (
+            cfg.lambda_amplitude * norms["amplitude_gradient_norm"]
         ),
     }
     density_norm = max(weighted["weighted_density_gradient_norm"], cfg.epsilon)
@@ -1508,6 +1551,38 @@ def run_e09b_preflight(
     }
 
 
+def training_body_volume_statistics(
+    dataset_directory: Path, *, gamma: float, minimum: float, maximum: float
+) -> dict[str, Any]:
+    """Derive body-volume weighting constants from the training manifest only."""
+
+    manifest = dataset_directory / "train_manifest.csv"
+    with manifest.open(encoding="utf-8", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    volumes = np.asarray(
+        [float(row["width_x"]) * float(row["width_y"]) * float(row["thickness_z"]) for row in rows],
+        dtype=np.float64,
+    )
+    if volumes.size == 0 or not np.all(np.isfinite(volumes)) or np.any(volumes <= 0):
+        raise ValueError("Training manifest contains invalid body volumes.")
+    median = float(np.median(volumes))
+    clipped = np.clip(np.power(median / volumes, gamma), minimum, maximum)
+    normalized = np.clip(clipped / np.mean(clipped), minimum, maximum)
+    return {
+        "source": str(manifest),
+        "split": "training_only",
+        "sample_count": int(volumes.size),
+        "median_body_volume_cells": median,
+        "minimum_body_volume_cells": float(np.min(volumes)),
+        "maximum_body_volume_cells": float(np.max(volumes)),
+        "raw_clipped_weight_mean": float(np.mean(clipped)),
+        "normalized_weight_mean": float(np.mean(normalized)),
+        "normalized_weight_minimum": float(np.min(normalized)),
+        "normalized_weight_maximum": float(np.max(normalized)),
+        "gamma": gamma,
+        "clip_minimum": minimum,
+        "clip_maximum": maximum,
+    }
 def run_e09c_preflight(
     model: E09CTrainingModel, gravity: tf.Tensor, density: tf.Tensor
 ) -> dict[str, Any]:
@@ -1594,7 +1669,7 @@ def save_e09b_loss_history_figure(
     figure, axis = plt.subplots(figsize=(10, 5))
     for name in (
         "loss", "density_loss", "depth_profile_loss", "z_center_loss",
-        "depth_loss", "sensitivity_loss",
+        "depth_loss", "sensitivity_loss", "density_amplitude_loss",
         "extent_loss", "top_boundary_loss", "bottom_boundary_loss", "thickness_loss",
     ):
         if name in history.history:
@@ -1770,6 +1845,16 @@ def main() -> None:
         save_e09b_sensitivity_diagnostics(
             sensitivity, sensitivity_weights, output_directory
         )
+        volume_statistics = training_body_volume_statistics(
+            dataset_directory,
+            gamma=config.e09b_volume_gamma,
+            minimum=config.e09b_sample_weight_min,
+            maximum=config.e09b_sample_weight_max,
+        )
+        if config.e09b_small_body_weighting:
+            (output_directory / "e09b_training_volume_weights.json").write_text(
+                json.dumps(volume_statistics, indent=2), encoding="utf-8"
+            )
         e09b_loss_config = E09BLossConfig(
             lambda_density=config.e09a_lambda_density,
             lambda_depth=config.e09a_lambda_depth,
@@ -1778,6 +1863,13 @@ def main() -> None:
             sensitivity_gamma=config.e09b_sensitivity_gamma,
             sensitivity_weight_min=config.e09b_weight_min,
             sensitivity_weight_max=config.e09b_weight_max,
+            lambda_amplitude=config.e09b_lambda_amplitude,
+            small_body_weighting=config.e09b_small_body_weighting,
+            volume_gamma=config.e09b_volume_gamma,
+            sample_weight_min=config.e09b_sample_weight_min,
+            sample_weight_max=config.e09b_sample_weight_max,
+            training_median_body_volume_cells=volume_statistics["median_body_volume_cells"],
+            training_weight_mean=volume_statistics["raw_clipped_weight_mean"],
             epsilon=config.e09a_epsilon,
             body_fraction=config.body_loss_fraction,
         )
@@ -2173,6 +2265,19 @@ def main() -> None:
         e09b_sensitivity_gamma=config.e09b_sensitivity_gamma,
         e09b_weight_min=config.e09b_weight_min,
         e09b_weight_max=config.e09b_weight_max,
+        e09b_lambda_amplitude=config.e09b_lambda_amplitude,
+        e09b_small_body_weighting=config.e09b_small_body_weighting,
+        e09b_volume_gamma=config.e09b_volume_gamma,
+        e09b_sample_weight_min=config.e09b_sample_weight_min,
+        e09b_sample_weight_max=config.e09b_sample_weight_max,
+        e09b_training_median_body_volume_cells=(
+            volume_statistics["median_body_volume_cells"]
+            if e09b_training else config.e09b_training_median_body_volume_cells
+        ),
+        e09b_training_weight_mean=(
+            volume_statistics["raw_clipped_weight_mean"]
+            if e09b_training else config.e09b_training_weight_mean
+        ),
         e09c_lambda_extent=config.e09c_lambda_extent,
         e09c_top_quantile=config.e09c_top_quantile,
         e09c_bottom_quantile=config.e09c_bottom_quantile,

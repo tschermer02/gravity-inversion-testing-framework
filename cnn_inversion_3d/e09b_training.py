@@ -23,13 +23,21 @@ class E09BLossConfig:
     sensitivity_gamma: float = 0.5
     sensitivity_weight_min: float = 0.5
     sensitivity_weight_max: float = 5.0
+    lambda_amplitude: float = 0.0
+    small_body_weighting: bool = False
+    volume_gamma: float = 0.5
+    sample_weight_min: float = 0.5
+    sample_weight_max: float = 2.0
+    training_median_body_volume_cells: float = 1.0
+    training_weight_mean: float = 1.0
     epsilon: float = 1.0e-8
     body_fraction: float = 0.5
 
     def validate(self) -> None:
         for name in (
             "lambda_density", "lambda_depth", "alpha_center",
-            "lambda_sensitivity", "sensitivity_gamma",
+            "lambda_sensitivity", "sensitivity_gamma", "lambda_amplitude",
+            "volume_gamma",
         ):
             if getattr(self, name) < 0.0:
                 raise ValueError(f"{name} must not be negative.")
@@ -43,6 +51,12 @@ class E09BLossConfig:
             raise ValueError("sensitivity weight minimum exceeds maximum.")
         if not 0.0 < self.body_fraction < 1.0:
             raise ValueError("body_fraction must be between zero and one.")
+        if not 0.0 < self.sample_weight_min <= self.sample_weight_max:
+            raise ValueError("sample-weight bounds must be positive and ordered.")
+        if self.training_median_body_volume_cells <= 0.0:
+            raise ValueError("training median body volume must be positive.")
+        if self.training_weight_mean <= 0.0:
+            raise ValueError("training weight mean must be positive.")
 
 
 def _bounded_mean_one(values: np.ndarray, minimum: float, maximum: float) -> np.ndarray:
@@ -88,6 +102,76 @@ def integrated_sensitivity_compensated_mse(
     return tf.reduce_mean(tf.math.divide_no_nan(numerator, denominator))
 
 
+def density_amplitude_mse_per_sample(
+    true_density: tf.Tensor, predicted_density: tf.Tensor, *, epsilon: float = 1.0e-8
+) -> tf.Tensor:
+    """Squared body-density contrast error using the same true body mask."""
+
+    mask = tf.cast(true_density > 0.0, predicted_density.dtype)
+    count = tf.reduce_sum(mask, axis=(1, 2, 3, 4))
+    true_mean = tf.math.divide_no_nan(
+        tf.reduce_sum(mask * true_density, axis=(1, 2, 3, 4)), count + epsilon
+    )
+    predicted_mean = tf.math.divide_no_nan(
+        tf.reduce_sum(mask * predicted_density, axis=(1, 2, 3, 4)), count + epsilon
+    )
+    return tf.square(predicted_mean - true_mean)
+
+
+def body_volume_sample_weights(truth: tf.Tensor, config: E09BLossConfig) -> tf.Tensor:
+    """Return weights based only on true volume and training-derived constants."""
+
+    volume = tf.reduce_sum(tf.cast(truth > 0.0, tf.float32), axis=(1, 2, 3, 4))
+    raw = tf.pow(config.training_median_body_volume_cells / volume, config.volume_gamma)
+    clipped = tf.clip_by_value(raw, config.sample_weight_min, config.sample_weight_max)
+    normalized = clipped / tf.cast(config.training_weight_mean, clipped.dtype)
+    return tf.clip_by_value(
+        normalized, config.sample_weight_min, config.sample_weight_max
+    )
+
+
+def _per_sample_e09b_terms(
+    truth: tf.Tensor, prediction: tf.Tensor, weights: tf.Tensor,
+    config: E09BLossConfig,
+) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    axes = (1, 2, 3, 4)
+    error = tf.square(prediction - truth)
+    body = tf.cast(truth > 0.0, prediction.dtype)
+    background = 1.0 - body
+    body_mse = tf.math.divide_no_nan(tf.reduce_sum(error * body, axes), tf.reduce_sum(body, axes))
+    background_mse = tf.math.divide_no_nan(
+        tf.reduce_sum(error * background, axes), tf.reduce_sum(background, axes)
+    )
+    density = config.body_fraction * body_mse + (1.0 - config.body_fraction) * background_mse
+    true_profile = tf.reduce_sum(truth, axis=(2, 3, 4))
+    predicted_profile = tf.reduce_sum(prediction, axis=(2, 3, 4))
+    true_normalized = tf.math.divide_no_nan(
+        true_profile, tf.reduce_sum(true_profile, axis=1, keepdims=True) + config.epsilon
+    )
+    predicted_normalized = tf.math.divide_no_nan(
+        predicted_profile,
+        tf.reduce_sum(predicted_profile, axis=1, keepdims=True) + config.epsilon,
+    )
+    profile = tf.reduce_mean(tf.square(predicted_normalized - true_normalized), axis=1)
+    z = tf.cast(5.0 + 10.0 * tf.range(24, dtype=tf.float32), prediction.dtype)[None, :]
+    true_center = tf.math.divide_no_nan(
+        tf.reduce_sum(true_profile * z, axis=1), tf.reduce_sum(true_profile, axis=1) + config.epsilon
+    )
+    predicted_center = tf.math.divide_no_nan(
+        tf.reduce_sum(predicted_profile * z, axis=1),
+        tf.reduce_sum(predicted_profile, axis=1) + config.epsilon,
+    )
+    center = tf.square((predicted_center - true_center) / 230.0)
+    weight_volume = tf.cast(weights, prediction.dtype)[None, ..., None]
+    sensitivity = tf.math.divide_no_nan(
+        tf.reduce_sum(weight_volume * error, axes), tf.reduce_sum(weight_volume, axes)
+    )
+    amplitude = density_amplitude_mse_per_sample(
+        truth, prediction, epsilon=config.epsilon
+    )
+    return density, profile, center, sensitivity, amplitude
+
+
 class E09BTrainingModel(tf.keras.Model):
     """Train unchanged E09 with corrected E09A plus sensitivity compensation."""
 
@@ -105,7 +189,7 @@ class E09BTrainingModel(tf.keras.Model):
             name: tf.keras.metrics.Mean(name=name)
             for name in (
                 "loss", "density_loss", "depth_profile_loss", "z_center_loss",
-                "depth_loss", "sensitivity_loss",
+                "depth_loss", "sensitivity_loss", "density_amplitude_loss",
             )
         }
         self.density_diagnostics = build_prediction_diagnostics()
@@ -120,25 +204,30 @@ class E09BTrainingModel(tf.keras.Model):
     def compute_loss_terms(self, gravity: tf.Tensor, truth: tf.Tensor, *, training: bool) -> tuple[tf.Tensor, ...]:
         prediction = self.inversion_model(gravity, training=training)
         cfg = self.loss_config
-        density = self.density_loss_function(truth, prediction)
-        profile = depth_profile_mse(truth, prediction, epsilon=cfg.epsilon)
-        center = z_center_mse(truth, prediction, epsilon=cfg.epsilon)
-        depth = profile + cfg.alpha_center * center
-        sensitivity = integrated_sensitivity_compensated_mse(
-            truth, prediction, self.sensitivity_weights
+        per_sample = _per_sample_e09b_terms(
+            truth, prediction, self.sensitivity_weights, cfg
         )
+        sample_weights = (
+            body_volume_sample_weights(truth, cfg)
+            if training and getattr(cfg, "small_body_weighting", False)
+            else tf.ones(tf.shape(truth)[0], tf.float32)
+        )
+        reduce = lambda values: tf.reduce_mean(tf.cast(sample_weights, values.dtype) * values)
+        density, profile, center, sensitivity, amplitude = map(reduce, per_sample)
+        depth = profile + cfg.alpha_center * center
         total = (
             cfg.lambda_density * density + cfg.lambda_depth * depth
             + cfg.lambda_sensitivity * sensitivity
+            + getattr(cfg, "lambda_amplitude", 0.0) * amplitude
         )
-        return prediction, density, profile, center, depth, sensitivity, total
+        return prediction, density, profile, center, depth, sensitivity, amplitude, total
 
     def _update(self, truth: tf.Tensor, terms: tuple[tf.Tensor, ...]) -> None:
-        prediction, density, profile, center, depth, sensitivity, total = terms
+        prediction, density, profile, center, depth, sensitivity, amplitude, total = terms
         for name, value in (
             ("loss", total), ("density_loss", density), ("depth_profile_loss", profile),
             ("z_center_loss", center), ("depth_loss", depth),
-            ("sensitivity_loss", sensitivity),
+            ("sensitivity_loss", sensitivity), ("density_amplitude_loss", amplitude),
         ):
             self.trackers[name].update_state(value)
         for metric in self.density_diagnostics:
