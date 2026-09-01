@@ -1,0 +1,7 @@
+split,body_size_group,count
+train,small,3334
+train,medium,3333
+train,large,3333
+validation,small,334
+validation,medium,333
+validation,large,333

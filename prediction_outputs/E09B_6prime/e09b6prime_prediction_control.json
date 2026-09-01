@@ -1,0 +1,7 @@
+{
+  "experiment": "E09B-6'",
+  "dataset": "/uufs/chpc.utah.edu/common/home/u1623542/gravity-inversion-testing-framework/datasets/canonical_single_plane_train10000_balanced_size_density",
+  "model": "/uufs/chpc.utah.edu/common/home/u1623542/gravity-inversion-testing-framework/training_outputs/E09B_6prime/best_model.keras",
+  "test_manifest_sha256": "f6a34337828d52bf074fb61cd9383f875261d5beb5ecdbb651e7a6d7106cd48d",
+  "sample_count": 100
+}

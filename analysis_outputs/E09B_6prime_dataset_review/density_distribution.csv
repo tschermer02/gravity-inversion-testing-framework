@@ -1,0 +1,7 @@
+split,density_group,count
+train,low,3334
+train,medium,3333
+train,high,3333
+validation,low,334
+validation,medium,333
+validation,high,333
