@@ -49,6 +49,7 @@ from cnn_inversion_3d.e09a_training import E09ADepthLossConfig, E09ATrainingMode
 from cnn_inversion_3d.e09b_training import (
     E09BLossConfig, E09BTrainingModel, build_e09b_sensitivity_weights,
 )
+from cnn_inversion_3d.e09b911_training import E09B911LossConfig, E09B911TrainingModel
 from cnn_inversion_3d.e09c_training import E09CLossConfig, E09CTrainingModel
 
 from cnn_inversion_3d.normalization import (
@@ -135,6 +136,8 @@ class TrainingConfig:
     e09b_sample_weight_max: float = 2.0
     e09b_training_median_body_volume_cells: float = 1.0
     e09b_training_weight_mean: float = 1.0
+    e09b_lambda_body_density: float = 0.0
+    e09b_lambda_gravity: float = 0.0
     e09c_lambda_extent: float = 1.0
     e09c_top_quantile: float = 0.05
     e09c_bottom_quantile: float = 0.95
@@ -266,7 +269,7 @@ class TrainingConfig:
                 body_fraction=self.body_loss_fraction,
             ).validate()
         if self.architecture == "single_plane_asymmetric_2d_unet_sensitivity_loss":
-            E09BLossConfig(
+            E09B911LossConfig(
                 lambda_density=self.e09a_lambda_density,
                 lambda_depth=self.e09a_lambda_depth,
                 alpha_center=self.e09a_alpha_center,
@@ -279,6 +282,8 @@ class TrainingConfig:
                 volume_gamma=self.e09b_volume_gamma,
                 sample_weight_min=self.e09b_sample_weight_min,
                 sample_weight_max=self.e09b_sample_weight_max,
+                lambda_body_density=self.e09b_lambda_body_density,
+                lambda_gravity=self.e09b_lambda_gravity,
                 epsilon=self.e09a_epsilon,
                 body_fraction=self.body_loss_fraction,
             ).validate()
@@ -421,6 +426,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--e09b-volume-gamma", type=float, default=None)
     parser.add_argument("--e09b-sample-weight-min", type=float, default=None)
     parser.add_argument("--e09b-sample-weight-max", type=float, default=None)
+    parser.add_argument("--e09b-lambda-body-density", type=float, default=None)
+    parser.add_argument("--e09b-lambda-gravity", type=float, default=None)
     parser.add_argument("--e09c-lambda-extent", type=float, default=None)
     parser.add_argument("--e09c-top-quantile", type=float, default=None)
     parser.add_argument("--e09c-bottom-quantile", type=float, default=None)
@@ -610,6 +617,7 @@ def apply_arguments(
             "e09b_weight_min", "e09b_weight_max",
             "e09b_lambda_amplitude", "e09b_small_body_weighting",
             "e09b_volume_gamma", "e09b_sample_weight_min", "e09b_sample_weight_max",
+            "e09b_lambda_body_density", "e09b_lambda_gravity",
         )
     )
     if (
@@ -659,6 +667,8 @@ def apply_arguments(
         ("e09b_volume_gamma", "e09b_volume_gamma"),
         ("e09b_sample_weight_min", "e09b_sample_weight_min"),
         ("e09b_sample_weight_max", "e09b_sample_weight_max"),
+        ("e09b_lambda_body_density", "e09b_lambda_body_density"),
+        ("e09b_lambda_gravity", "e09b_lambda_gravity"),
         ("e09c_lambda_extent", "e09c_lambda_extent"),("e09c_top_quantile", "e09c_top_quantile"),
         ("e09c_bottom_quantile", "e09c_bottom_quantile"),("e09c_boundary_sharpness", "e09c_boundary_sharpness"),
     ):
@@ -1057,6 +1067,8 @@ def save_training_metadata(
                 "(normalized_depth_profile_mse + alpha_center * normalized_z_center_mse) + "
                 "lambda_sensitivity * integrated_sensitivity_compensated_mse + "
                 "lambda_amplitude * true_body_region_density_amplitude_mse; optional "
+                "lambda_body_density * true_body_voxel_density_mse + "
+                "lambda_gravity * global_normalized_gravity_mse; optional "
                 "training-only normalized true-body-volume sample weighting"
                 if config.architecture == "single_plane_asymmetric_2d_unet_sensitivity_loss"
                 else "lambda_density * BalancedDensityMSE + lambda_depth * "
@@ -1121,6 +1133,17 @@ def save_training_metadata(
                     "training_raw_clipped_weight_mean": config.e09b_training_weight_mean,
                     "volume_statistics_source": "train_manifest.csv only",
                     "validation_and_test_sample_weighting": False,
+                    "lambda_body_density": config.e09b_lambda_body_density,
+                    "body_density_definition": (
+                        "sum(true_body_mask * square(prediction-truth)) / "
+                        "(sum(true_body_mask)+epsilon)"
+                    ),
+                    "lambda_gravity": config.e09b_lambda_gravity,
+                    "gravity_loss_definition": (
+                        "existing global_normalized_gravity_mse using fixed "
+                        "DifferentiableSinglePlaneGz"
+                    ),
+                    "forward_operator_trainable": False,
                     "epsilon": config.e09a_epsilon,
                     "sensitivity_normalization": "bounded clipped weights with exact global mean one",
                     "sensitivity_definition": "S_k = sqrt(sum_i A_ik^2)",
@@ -1583,6 +1606,32 @@ def training_body_volume_statistics(
         "clip_minimum": minimum,
         "clip_maximum": maximum,
     }
+
+
+def run_e09b911_preflight(
+    model: E09B911TrainingModel, gravity: tf.Tensor, density: tf.Tensor
+) -> dict[str, Any]:
+    """Verify finite E09B-9/10/11 terms and trainable-network gradients."""
+
+    variables = model.inversion_model.trainable_variables
+    with tf.GradientTape(persistent=True) as tape:
+        terms = model.compute_loss_terms(gravity, density, training=False)
+    names = ("density", "depth_profile", "z_center", "depth", "sensitivity",
+             "amplitude", "body_density", "gravity", "weighted_gravity", "total")
+    losses = dict(zip(names, terms[1:]))
+    gradient_names = ("body_density", "gravity", "total")
+    norms = {}
+    for name in gradient_names:
+        gradients = [value for value in tape.gradient(losses[name], variables) if value is not None]
+        norms[f"{name}_gradient_norm"] = float(tf.linalg.global_norm(gradients).numpy())
+    del tape
+    values = {f"{name}_loss": float(value.numpy()) for name, value in losses.items()}
+    if not np.all(np.isfinite([*values.values(), *norms.values()])):
+        raise ValueError("E09B-9/10/11 preflight contains NaN or Inf.")
+    return {**values, **norms, "input_shape": list(gravity.shape),
+            "output_shape": list(terms[0].shape),
+            "forward_operator_trainable_variables": len(model.forward_operator.trainable_variables),
+            "density_order": "batch,z,y,x,channel"}
 def run_e09c_preflight(
     model: E09CTrainingModel, gravity: tf.Tensor, density: tf.Tensor
 ) -> dict[str, Any]:
@@ -1670,6 +1719,8 @@ def save_e09b_loss_history_figure(
     for name in (
         "loss", "density_loss", "depth_profile_loss", "z_center_loss",
         "depth_loss", "sensitivity_loss", "density_amplitude_loss",
+        "body_density_loss", "gravity_loss", "weighted_gravity_loss",
+        "gravity_rmse", "gravity_correlation",
         "extent_loss", "top_boundary_loss", "bottom_boundary_loss", "thickness_loss",
     ):
         if name in history.history:
@@ -1855,7 +1906,12 @@ def main() -> None:
             (output_directory / "e09b_training_volume_weights.json").write_text(
                 json.dumps(volume_statistics, indent=2), encoding="utf-8"
             )
-        e09b_loss_config = E09BLossConfig(
+        extended_e09b = (
+            config.e09b_lambda_body_density > 0.0
+            or config.e09b_lambda_gravity > 0.0
+        )
+        loss_config_class = E09B911LossConfig if extended_e09b else E09BLossConfig
+        e09b_loss_config = loss_config_class(
             lambda_density=config.e09a_lambda_density,
             lambda_depth=config.e09a_lambda_depth,
             alpha_center=config.e09a_alpha_center,
@@ -1870,24 +1926,31 @@ def main() -> None:
             sample_weight_max=config.e09b_sample_weight_max,
             training_median_body_volume_cells=volume_statistics["median_body_volume_cells"],
             training_weight_mean=volume_statistics["raw_clipped_weight_mean"],
+            **({
+                "lambda_body_density": config.e09b_lambda_body_density,
+                "lambda_gravity": config.e09b_lambda_gravity,
+            } if extended_e09b else {}),
             epsilon=config.e09a_epsilon,
             body_fraction=config.body_loss_fraction,
         )
-        model = E09BTrainingModel(
-            inversion_model, sensitivity_weights, loss_config=e09b_loss_config
+        model = (
+            E09B911TrainingModel(
+                inversion_model, sensitivity_weights, DifferentiableSinglePlaneGz(),
+                gravity_scale=resolved_gravity_scale, loss_config=e09b_loss_config,
+            )
+            if extended_e09b
+            else E09BTrainingModel(
+                inversion_model, sensitivity_weights, loss_config=e09b_loss_config
+            )
         )
         model.compile(optimizer=tf.keras.optimizers.Adam(config.learning_rate))
         sample_gravity, sample_density = next(iter(training_dataset))
-        pretraining_loss_scales = run_e09b_preflight(
-            model, sample_gravity, sample_density
+        pretraining_loss_scales = (
+            run_e09b911_preflight(model, sample_gravity, sample_density)
+            if extended_e09b
+            else run_e09b_preflight(model, sample_gravity, sample_density)
         )
-        print("E09B raw gradient norms:", {
-            key: pretraining_loss_scales[key] for key in (
-                "density_gradient_norm", "depth_profile_gradient_norm",
-                "z_center_gradient_norm", "depth_gradient_norm",
-                "sensitivity_gradient_norm", "total_gradient_norm",
-            )
-        })
+        print("E09B pre-training diagnostics:", pretraining_loss_scales)
         (output_directory / "e09b_pretraining_diagnostics.json").write_text(
             json.dumps(pretraining_loss_scales, indent=2), encoding="utf-8"
         )
@@ -2278,6 +2341,8 @@ def main() -> None:
             volume_statistics["raw_clipped_weight_mean"]
             if e09b_training else config.e09b_training_weight_mean
         ),
+        e09b_lambda_body_density=config.e09b_lambda_body_density,
+        e09b_lambda_gravity=config.e09b_lambda_gravity,
         e09c_lambda_extent=config.e09c_lambda_extent,
         e09c_top_quantile=config.e09c_top_quantile,
         e09c_bottom_quantile=config.e09c_bottom_quantile,
