@@ -1868,6 +1868,7 @@ def main() -> None:
     e10_training = config.architecture == "single_plane_e10_sensitivity_unet"
     e09a_training = config.architecture == "single_plane_asymmetric_2d_unet_depth_loss"
     e09b_training = config.architecture == "single_plane_asymmetric_2d_unet_sensitivity_loss"
+    extended_e09b = False
     e09c_training = config.architecture == "single_plane_asymmetric_2d_unet_extent_loss"
     physics_training = (
         e10_training
@@ -2223,6 +2224,7 @@ def main() -> None:
     compile_baseline_model(
         best_model,
         model_config,
+        jit_compile=False if extended_e09b else "auto",
     )
 
     test_results = best_model.evaluate(

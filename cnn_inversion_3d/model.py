@@ -859,6 +859,8 @@ class BalancedDensityMSE(tf.keras.losses.Loss):
 def compile_baseline_model(
     model: tf.keras.Model,
     config: ModelConfig | None = None,
+    *,
+    jit_compile: bool | str = "auto",
 ) -> None:
     """
     Compile the baseline model.
@@ -873,6 +875,10 @@ def compile_baseline_model(
         Model returned by ``build_baseline_model``.
     config
         Optional model configuration.
+    jit_compile
+        Keras JIT policy. ``"auto"`` preserves the historical behavior;
+        callers using a differentiable physics training wrapper may disable
+        XLA explicitly for toolchain compatibility.
     """
 
     if config is None:
@@ -893,6 +899,7 @@ def compile_baseline_model(
     model.compile(
         optimizer=optimizer,
         loss=balanced_loss,
+        jit_compile=jit_compile,
         metrics=[
             tf.keras.metrics.MeanSquaredError(
                 name="density_mse"
