@@ -49,8 +49,11 @@ class E09B911TrainingModel(E09BTrainingModel):
         self.forward_operator = forward_operator
         self.gravity_scale = float(gravity_scale)
         if self.gravity_scale <= 0.0: raise ValueError("gravity_scale must be positive.")
-        for name in ("body_density_loss", "gravity_loss", "weighted_gravity_loss",
-                     "gravity_rmse", "gravity_correlation"):
+        tracker_names = ["body_density_loss"]
+        if loss_config.lambda_gravity > 0.0:
+            tracker_names.extend(("gravity_loss", "weighted_gravity_loss",
+                                  "gravity_rmse", "gravity_correlation"))
+        for name in tracker_names:
             self.trackers[name] = tf.keras.metrics.Mean(name=name)
 
     def compute_loss_terms(self, gravity: tf.Tensor, truth: tf.Tensor, *, training: bool) -> tuple[tf.Tensor, ...]:
@@ -58,10 +61,13 @@ class E09B911TrainingModel(E09BTrainingModel):
         prediction = base[0]; cfg = self.loss_config
         body_density = tf.reduce_mean(body_density_mse_per_sample(
             truth, prediction, epsilon=cfg.epsilon))
-        true_gravity = tf.cast(gravity * self.gravity_scale, tf.float32)
-        predicted_gravity = self.forward_operator(prediction)
-        gravity_loss = global_normalized_gravity_mse(
-            true_gravity, predicted_gravity, gravity_scale=self.gravity_scale)
+        if cfg.lambda_gravity > 0.0:
+            true_gravity = tf.cast(gravity * self.gravity_scale, tf.float32)
+            predicted_gravity = self.forward_operator(prediction)
+            gravity_loss = global_normalized_gravity_mse(
+                true_gravity, predicted_gravity, gravity_scale=self.gravity_scale)
+        else:
+            gravity_loss = tf.zeros((), dtype=prediction.dtype)
         weighted_gravity = cfg.lambda_gravity * gravity_loss
         total = base[-1] + cfg.lambda_body_density * body_density + weighted_gravity
         return (*base[:-1], body_density, gravity_loss, weighted_gravity, total)
@@ -70,6 +76,9 @@ class E09B911TrainingModel(E09BTrainingModel):
                          terms: tuple[tf.Tensor, ...]) -> None:
         super()._update(truth, (*terms[:7], terms[-1]))
         body_density, gravity_loss, weighted_gravity = terms[7:10]
+        self.trackers["body_density_loss"].update_state(body_density)
+        if self.loss_config.lambda_gravity <= 0.0:
+            return
         prediction = terms[0]
         true_gravity = tf.cast(gravity * self.gravity_scale, tf.float32)
         predicted_gravity = self.forward_operator(prediction)
@@ -82,8 +91,7 @@ class E09B911TrainingModel(E09BTrainingModel):
             tf.reduce_sum(true_centered * predicted_centered, axis=1),
             tf.norm(true_centered, axis=1) * tf.norm(predicted_centered, axis=1),
         )
-        for name, value in (("body_density_loss", body_density),
-                            ("gravity_loss", gravity_loss),
+        for name, value in (("gravity_loss", gravity_loss),
                             ("weighted_gravity_loss", weighted_gravity),
                             ("gravity_rmse", tf.sqrt(tf.reduce_mean(tf.square(residual)))),
                             ("gravity_correlation", tf.reduce_mean(correlation))):

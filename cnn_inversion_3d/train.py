@@ -1943,7 +1943,10 @@ def main() -> None:
                 inversion_model, sensitivity_weights, loss_config=e09b_loss_config
             )
         )
-        model.compile(optimizer=tf.keras.optimizers.Adam(config.learning_rate))
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(config.learning_rate),
+            jit_compile=False if extended_e09b else "auto",
+        )
         sample_gravity, sample_density = next(iter(training_dataset))
         pretraining_loss_scales = (
             run_e09b911_preflight(model, sample_gravity, sample_density)

@@ -26,6 +26,13 @@ def wrapper(body=0.0,gravity=0.0):
                                 gravity_scale=.23,loss_config=config)
 
 
+class FailingForwardOperator(tf.keras.layers.Layer):
+    """Sentinel proving that a disabled physics term is never evaluated."""
+
+    def call(self, prediction):
+        raise AssertionError("gravity forward operator must not be called")
+
+
 def test_body_density_loss_is_true_support_voxel_mse():
     _,truth=batch();prediction=truth*.5
     np.testing.assert_allclose(body_density_mse_per_sample(truth,prediction),[.09],rtol=1e-5)
@@ -39,6 +46,25 @@ def test_total_adds_only_configured_terms_and_operator_is_fixed():
     assert not model.forward_operator.trainable
     assert len(model.forward_operator.trainable_variables)==0
     assert model.inversion_model.count_params()==3076
+
+
+def test_zero_gravity_weight_skips_forward_operator_and_gravity_trackers():
+    gravity,truth=batch();_,weights=build_e09b_sensitivity_weights()
+    inversion=build_asymmetric_2d_unet_model(ModelConfig(base_filters=1))
+    model=E09B911TrainingModel(
+        inversion,weights,FailingForwardOperator(),gravity_scale=.23,
+        loss_config=E09B911LossConfig(
+            lambda_depth=2,lambda_amplitude=1,
+            lambda_body_density=1,lambda_gravity=0,
+        ),
+    )
+    model.compile(optimizer=tf.keras.optimizers.Adam(1e-3),jit_compile=False)
+    terms=model.compute_loss_terms(gravity,truth,training=False)
+    assert float(terms[8].numpy())==0.0
+    assert float(terms[9].numpy())==0.0
+    logs=model.train_step((gravity,truth))
+    assert "body_density_loss" in logs
+    assert "gravity_loss" not in logs
 
 
 def test_preflight_reports_finite_nonzero_component_gradients():
