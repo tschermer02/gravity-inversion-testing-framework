@@ -1,0 +1,30 @@
+{
+  "density_loss": 0.17908549308776855,
+  "depth_profile_loss": 0.0034685153514146805,
+  "z_center_loss": 0.02354634739458561,
+  "depth_loss": 0.02701486274600029,
+  "sensitivity_loss": 0.2492067813873291,
+  "amplitude_loss": 0.10710947215557098,
+  "body_density_loss": 0.10774428397417068,
+  "gravity_loss": 0.0,
+  "weighted_gravity_loss": 0.0,
+  "total_loss": 0.6971757411956787,
+  "body_density_gradient_norm": 0.10776390880346298,
+  "gravity_gradient_norm": 0.0,
+  "total_gradient_norm": 0.2407204657793045,
+  "input_shape": [
+    2,
+    81,
+    81,
+    1
+  ],
+  "output_shape": [
+    2,
+    24,
+    64,
+    64,
+    1
+  ],
+  "forward_operator_trainable_variables": 0,
+  "density_order": "batch,z,y,x,channel"
+}
